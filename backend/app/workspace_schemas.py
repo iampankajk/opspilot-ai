@@ -92,3 +92,55 @@ class Workspace(Schema):
         }:
             raise ValueError("Exactly one of each approved thread is required")
         return self
+
+
+class Money(Schema):
+    amount: str = Field(pattern=r"^-?\d+(\.\d+)?$")
+    currency: str
+
+
+class RelatedOrderReference(Schema):
+    value: str
+    association: Literal["direct", "candidate", "contextual"]
+    basis_record_id: LocalID
+
+
+class PaymentState(Schema):
+    label: str
+    basis_record_ids: list[LocalID]
+    limitations: list[str]
+
+
+class AssociationBasis(Schema):
+    category: Literal[
+        "direct_ref_match", "documented_lookup", "field_match", "temporal_context", "unverified"
+    ]
+    matched_fields: dict
+    explanation: str
+    basis_record_id: LocalID | None
+
+
+class CaseSummary(Schema):
+    case_id: LocalID
+    case_reference: str
+    primary_report_record_id: LocalID
+    customer_ref: str | None
+    reported_order_ref: str | None
+    related_order_refs: list[RelatedOrderReference]
+    reported_issue: str
+    reported_money: Money | None
+    reported_at: SourceTime
+    payment_state: PaymentState | None
+    investigation_progress: Literal["not_started"] = "not_started"
+
+
+class CaseList(Schema):
+    investigation_id: UUID
+    state_id: UUID
+    draft_version: int = Field(ge=0)
+    thread_kind: ThreadKind
+    cases: list[CaseSummary]
+
+
+class CaseListQuery(Schema):
+    state_id: UUID

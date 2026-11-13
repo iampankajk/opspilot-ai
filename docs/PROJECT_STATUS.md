@@ -4,14 +4,14 @@
 
 ## Current state
 
-- **Status:** Tasks 1–3 (foundation, anonymous sessions, and visitor-owned workspace initialization/retrieval) implemented and locally verified on 13 November 2026. The full approved first slice remains incomplete. Task 4 has not been started.
+- **Status:** Tasks 1–3 and Task 4A (case/evidence persistence and thread-scoped listing) implemented and locally verified on 13 November 2026. The full approved first slice remains incomplete. Task 4B has not started.
 - **Current phase:** Application foundation implementation, following the finalized first-slice contracts.
-- **Current milestone:** Migration boundary 002 and the three Task 3 endpoints are complete. D-023 explicitly approves the staged workspace before relational case/evidence loading. Await the owner's next bounded task.
+- **Current milestone:** Migration boundary 003, atomic legacy materialization, and authenticated thread-scoped case listing are complete. Await the owner's explicit Task 4B instruction.
 - **Target cadence:** Approximately 3 hours per day, flexible 60-day plan; extend for understanding.
-- **Implementation started:** Yes. Foundation, session authentication, validated fixture/catalog registration, authenticated incident entry, atomic investigation create/resume, owned workspace retrieval, and a minimal frontend flow exist. Migration head is `0002_working_workspace`; only eight domain tables are implemented.
+- **Implementation started:** Yes. Foundation, session authentication, validated fixture/catalog registration, authenticated incident entry, atomic investigation create/resume, owned workspace retrieval, and a minimal frontend flow exist. Migration head is `0003_case_evidence`; 13 domain tables are implemented.
 - **Approved technical direction:** Next.js; one modular FastAPI/Python backend with Pydantic/OpenAPI; PostgreSQL locally/hosted; SQLAlchemy 2.x; Alembic; anonymous hashed-token secure HttpOnly cookie sessions with expiry; visitor-owned investigations; bounded synchronous execution; configured repository fixtures; full relational snapshots in a later slice. See [Decision Log](DECISION_LOG.md), including D-019–D-022 and the preserved historical review crosswalk.
-- **Approved first-slice scope:** Incident entry → visitor-owned investigation → two threads → case listing → inspectable synthetic evidence → durable reload, using the existing 17-table subset. First-slice contracts are in [System Architecture](SYSTEM_ARCHITECTURE_V0.1.md), section 4, and [Domain Model](DOMAIN_MODEL_ERD_V0.1.md), section 18. Only the foundation subset described below is implemented/tested; the full slice is not complete.
-- **Still deferred:** The other 12 target tables, AI proposals, human review, revisions/refresh/history/export, annotations, and typed financial analysis; later schema/pointer/immutability details. Hosting/model provider, vector storage, AI orchestration, and general retention/purge remain unselected. No login/account recovery, queue, or microservices are added.
+- **Approved first-slice scope:** Incident entry → visitor-owned investigation → two threads → case listing → inspectable synthetic evidence → durable reload, using the existing 17-table subset. First-slice contracts are in [System Architecture](SYSTEM_ARCHITECTURE_V0.1.md), section 4, and [Domain Model](DOMAIN_MODEL_ERD_V0.1.md), section 18. The implementation reaches persisted case listing; evidence-request execution/history is still pending.
+- **Still deferred:** The remaining four first-slice history tables, AI proposals, human review, revisions/refresh/history/export, annotations, and typed financial analysis; later schema/pointer/immutability details. Hosting/model provider, vector storage, AI orchestration, and general retention/purge remain unselected. No login/account recovery, queue, or microservices are added.
 
 ## Completed
 
@@ -57,10 +57,17 @@
 - Verified **75 backend tests**, **7 frontend tests**, TypeScript/build, Ruff lint/format, dependency checks, and Alembic head/schema consistency. Forced-race concurrency, graph rollback, cross-visitor isolation, missing/expired/invalid credentials, bad fixtures, and application/engine restart checks passed. A separate real HTTPS process restart with a fresh client connection restored the identical workspace and cookie authentication.
 - Real browser: incident load, create, both thread controls, explicit workspace retrieval, and full page reload passed with stable investigation/state IDs. Existing user development servers were not stopped. Temporary verification processes were stopped afterward. [Workspace implementation and verification](INVESTIGATION_WORKSPACES.md) records exact commands, changed files, limits, and the next task.
 
+- Task 4A: retained the clean `codex/task-3-investigation-workspace` branch at the owner's instruction; no branch switch, staging, commit, push, merge, or PR. Applied additive migration `0003_case_evidence` after 002 in development and test databases; existing history/data were retained.
+- Added the five approved graph tables with same-state composite FKs. Materialize exactly 14 source records, two cases, two memberships, 11 case-record links, and 14 explicitly attributed relationships. Original fixture/package and their digests are unchanged; no attempts/events or later workflow tables were introduced.
+- New initialization is atomic at draft version 0. Owned legacy access serializes on its investigation row and atomically loads that state's pinned dataset; owner/state/draft are preserved and the draft version advances once. Complete graphs are read from PostgreSQL; incomplete/inconsistent graphs fail visibly without overwrite.
+- Added authenticated/current-state `GET /api/v1/investigations/{id}/threads/{thread}/cases?state_id=...` with safe foreign/unknown 404, stale-state 409, and invalid/extra input 422. UI displays each thread's persisted case with loading, failure/retry, and empty-result branches. Reported orders/money remain separate from lookup candidates; unknown payment outcomes and coverage gaps stay explicit.
+- Verified **107 backend tests**, **11 frontend tests**, TypeScript and production build, Ruff lint/format, Python dependency consistency, Alembic current/check, and HTTPS readiness. Backend checks include real PostgreSQL concurrency, legacy/new rollback, expiry before commit, exact fixture mapping, composite FK rejection, ownership isolation, and app/engine restart. A separate real HTTPS process restart restored identical workspace/case data using a fresh connection and the original in-memory cookie.
+- Browser verification observed loading and both mapped case lists, candidate-vs-reported order semantics, and identical workspace/state/version after full reload. This browser resumed a real stage-002 workspace and materialized it once to version 1. Empty-list data and failure/retry contracts are tested in frontend unit tests; their UI branches were not forced against the fixed nonempty catalog. Existing development servers remain running; temporary restart-probe processes were stopped. See [Task 4A implementation and verification](CASE_PERSISTENCE.md).
+
 ## In progress
 
-- Task 3 is complete. Await explicit owner instruction for Task 4; no further implementation proceeds automatically. Retain D-019 authentication and D-023's pinned, staged workspace boundary.
-- Remaining first-slice work includes stage 003 case/evidence persistence and listing, then stage 004 evidence-request history/execution. Existing stage-002 workspaces need atomic materialization of their own pinned fixture without changing owner/state/dataset or silently refreshing. The future revision-baseline FK remains deferred until numbered history exists.
+- Task 4A is complete. Await explicit owner instruction for Task 4B; no further implementation proceeds automatically. Retain D-019 authentication and pinned state ownership.
+- Remaining first-slice work is stage 004 evidence-request history/execution. Legacy stage-002 materialization is now implemented. The future revision-baseline FK remains deferred until numbered history exists.
 - The minimal synthetic evidence package remains frozen. Optional tabletop materials remain available; no exercise results or real-world validation have been established.
 - All six investigation screens have reviewed first-pass designs. Consolidated UX consistency remains follow-up work, including claim-review-derived progress wording. The approved mandatory correction rationale remains applicable to both threads.
 
@@ -73,16 +80,17 @@
 
 ## Immediate implementation blockers
 
+Verification follow-up: an initial sandbox-blocked pytest traceback exposed the local database password in tool output. Credentials were not changed or committed. Rotate that credential in a separately authorized configuration task; see [Task 4A verification notes](CASE_PERSISTENCE.md).
+
 No unresolved architecture/product-data blocker is identified for this approved slice. The prior visitor/session, access/migration tooling, and slice-scope decisions are resolved by D-019–D-022. Missing bank evidence, provider completeness, and unresolved root cause are intentional source limitations, not reasons to fabricate data or delay this inspection slice.
 
-Foundation setup is verified with Python 3.12.11, Node 22.21.1, PostgreSQL 18.6, SQLAlchemy 2.0.57, psycopg 3.3.9, Alembic 1.20.1, FastAPI 0.162.5, and Next.js 16.4.6. Same-origin HTTPS readiness, Cookie/Set-Cookie forwarding, and owned workspace access are verified. The local certificate is self-signed and public deployment TLS is not configured. One upstream Starlette TestClient deprecation warning remains; all 75 backend tests and 7 frontend tests pass. Fixture validation is implemented, but relational case/evidence materialization and descendant authorization remain pending. D-023 resolves the staged-initialization conflict identified at Task 3 start. No unresolved Task 3 blocker remains. Public hosting controls and later retention policy remain outside this task.
+Foundation setup is verified with Python 3.12.11, Node 22.21.1, PostgreSQL 18.6, SQLAlchemy 2.0.57, psycopg 3.3.9, Alembic 1.20.1, FastAPI 0.162.5, and Next.js 16.4.6. Same-origin HTTPS readiness, Cookie/Set-Cookie forwarding, and owned workspace access are verified. The local certificate is self-signed and public deployment TLS is not configured. One upstream Starlette TestClient deprecation warning remains; all 107 backend tests and 11 frontend tests pass. Relational case/evidence materialization and owned thread listing are implemented; evidence-request execution/history and its descendant authorization remain pending. D-023 resolves the staged-initialization conflict identified at Task 3 start. No unresolved Task 4A blocker remains. Public hosting controls and later retention policy remain outside this task.
 
 ## Next actions
 
-1. Review Task 3's [workspace implementation and verification](INVESTIGATION_WORKSPACES.md). Await the owner's explicit next task; Task 4 has not started.
-2. When requested, implement stage 003 case/evidence relational persistence and case listing, including atomic materialization for existing pinned states and exact same-state composite FKs.
-3. Implement stage 004 before exposing evidence-request execution/history. Do not silently refresh/reassign existing workspaces or introduce numbered revisions, AI/review/export, or all 29 target tables.
-4. Run the remaining first-slice acceptance checks against real PostgreSQL and browser behavior. Task 3's successful workspace checks do not establish the complete case/evidence journey.
+1. Review the [Task 4A implementation and verification](CASE_PERSISTENCE.md) and uncommitted changes. Suggested commit: `feat(cases): persist evidence and list thread-scoped cases`.
+2. Only when explicitly requested, Task 4B: add stage 004 (`evidence_requests`, `request_sources`, `retrieval_results`, `retrieval_result_records`), then implement the approved bounded case evidence-request endpoint and inspection UI with source outcomes, retry/history, and state/version/ownership checks.
+3. Complete remaining first-slice acceptance checks. Do not introduce AI/reviews/revisions/export or silently refresh existing states.
 
 ## Recent decisions and historical context
 

@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
@@ -10,6 +11,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     MetaData,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -174,4 +176,152 @@ class StateSource(Base):
     availability: Mapped[str] = mapped_column(Text)
     scope: Mapped[str | None] = mapped_column(Text)
     completeness: Mapped[str] = mapped_column(Text)
+    limitations: Mapped[list] = mapped_column(JSONB)
+
+
+class EvidenceRecord(Base):
+    __tablename__ = "evidence_records"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "source_key"],
+            ["state_sources.state_id", "state_sources.source_key"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("state_id", "evidence_record_id", "source_key"),
+        CheckConstraint("evidence_record_id ~ '^[A-Za-z0-9._:-]{1,128}$'", name="local_id"),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    evidence_record_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_key: Mapped[str] = mapped_column(Text)
+    source_name: Mapped[str] = mapped_column(Text)
+    record_type: Mapped[str] = mapped_column(Text)
+    source_record_reference: Mapped[str | None] = mapped_column(Text)
+    fixture_provenance: Mapped[dict] = mapped_column(JSONB)
+    source_digest: Mapped[str] = mapped_column(String(64))
+    payload: Mapped[dict] = mapped_column(JSONB)
+    raw_markdown: Mapped[str] = mapped_column(Text)
+    timestamps: Mapped[list] = mapped_column(JSONB)
+    field_provenance: Mapped[dict] = mapped_column(JSONB)
+
+
+class PaymentCase(Base):
+    __tablename__ = "payment_cases"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "primary_report_record_id"],
+            ["evidence_records.state_id", "evidence_records.evidence_record_id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("state_id", "case_reference"),
+        CheckConstraint("case_id ~ '^[A-Za-z0-9._:-]{1,128}$'", name="local_id"),
+        CheckConstraint(
+            "(reported_amount IS NULL) = (reported_currency IS NULL)", name="money_pair"
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    case_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    case_reference: Mapped[str] = mapped_column(Text)
+    primary_report_record_id: Mapped[str] = mapped_column(Text)
+    customer_ref: Mapped[str | None] = mapped_column(Text)
+    reported_order_ref: Mapped[str | None] = mapped_column(Text)
+    related_order_refs: Mapped[list] = mapped_column(JSONB)
+    reported_issue: Mapped[str] = mapped_column(Text)
+    reported_amount: Mapped[Decimal | None] = mapped_column(Numeric())
+    reported_currency: Mapped[str | None] = mapped_column(Text)
+    reported_at: Mapped[dict] = mapped_column(JSONB)
+    payment_state: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
+    field_provenance: Mapped[dict] = mapped_column(JSONB)
+
+
+class CaseThread(Base):
+    __tablename__ = "case_threads"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "thread_kind"],
+            ["thread_states.state_id", "thread_states.thread_kind"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "case_id"],
+            ["payment_cases.state_id", "payment_cases.case_id"],
+            ondelete="RESTRICT",
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    thread_kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    case_id: Mapped[str] = mapped_column(Text, primary_key=True)
+
+
+class CaseEvidenceLink(Base):
+    __tablename__ = "case_evidence_links"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "case_id"],
+            ["payment_cases.state_id", "payment_cases.case_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "evidence_record_id"],
+            ["evidence_records.state_id", "evidence_records.evidence_record_id"],
+            name="fk_case_evidence_links_record",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "basis_record_id"],
+            ["evidence_records.state_id", "evidence_records.evidence_record_id"],
+            name="fk_case_evidence_links_basis",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "category IN ('direct_ref_match', 'documented_lookup', "
+            "'field_match', 'temporal_context', 'unverified')",
+            name="category",
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    case_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    evidence_record_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    category: Mapped[str] = mapped_column(Text)
+    matched_fields: Mapped[dict] = mapped_column(JSONB)
+    explanation: Mapped[str] = mapped_column(Text)
+    basis_record_id: Mapped[str | None] = mapped_column(Text)
+
+
+class EvidenceRelationship(Base):
+    __tablename__ = "evidence_relationships"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "from_record_id"],
+            ["evidence_records.state_id", "evidence_records.evidence_record_id"],
+            name="fk_evidence_relationships_from_record",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "to_record_id"],
+            ["evidence_records.state_id", "evidence_records.evidence_record_id"],
+            name="fk_evidence_relationships_to_record",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "basis_record_id"],
+            ["evidence_records.state_id", "evidence_records.evidence_record_id"],
+            name="fk_evidence_relationships_basis",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("relationship_id ~ '^[A-Za-z0-9._:-]{1,128}$'", name="local_id"),
+        CheckConstraint(
+            "category IN ('direct_ref_match', 'documented_lookup', "
+            "'field_match', 'temporal_context', 'unverified')",
+            name="category",
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    relationship_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    from_record_id: Mapped[str] = mapped_column(Text)
+    to_record_id: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(Text)
+    matched_fields: Mapped[dict] = mapped_column(JSONB)
+    explanation: Mapped[str] = mapped_column(Text)
+    basis_record_id: Mapped[str | None] = mapped_column(Text)
+    attribution: Mapped[str] = mapped_column(Text)
     limitations: Mapped[list] = mapped_column(JSONB)

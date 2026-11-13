@@ -3,7 +3,8 @@
 Task 3 implements authenticated incident entry, atomic investigation creation/resume, and durable
 workspace retrieval. The owner approved D-023 to stage this work after migration 002, before
 relational case/evidence persistence. No case/evidence endpoints, model calls, reviews, numbered
-revisions, refresh, or export are included. Task 4 has not been started.
+revisions, refresh, or export are included. This records the Task 3 boundary; [Task 4A](CASE_PERSISTENCE.md) now adds migration 003,
+atomic backfill, and persisted case listing. Stage-002 results below remain historical.
 
 ## Run and inspect
 

@@ -42,6 +42,11 @@ def check_database(engine: Engine, expected_revision: str) -> str | None:
                 "working_drafts",
                 "thread_states",
                 "state_sources",
+                "evidence_records",
+                "payment_cases",
+                "case_threads",
+                "case_evidence_links",
+                "evidence_relationships",
             }
             if not required <= tables:
                 return "SCHEMA_NOT_READY"

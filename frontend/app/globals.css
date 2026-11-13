@@ -19,3 +19,7 @@ input:focus-visible { outline: 3px solid #b66b00; outline-offset: 3px; }
 .incident-context { margin: 24px 0; padding: 16px; border-left: 3px solid #19486b; background: #f4f7fa; }
 .thread-nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
 .thread-nav button[aria-pressed="false"] { background: #e7edf3; color: #19486b; }
+
+.case-summary { margin: 20px 0; padding: 20px; border: 1px solid #ccd6df; border-radius: 8px; overflow-wrap: anywhere; }
+.case-summary dt { font-weight: 650; margin-top: 12px; }
+.case-summary dd { margin: 4px 0 0; line-height: 1.6; }

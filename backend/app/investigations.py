@@ -2,28 +2,36 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, Response
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, Request, Response
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.api_errors import APIError
-from app.catalog import FixtureCase, SourceCoverage
+from app.catalog import SourceCoverage
+from app.materialization import materialize_state
 from app.models import (
+    CaseThread,
     DatasetVersion,
     Investigation,
     InvestigationState,
+    PaymentCase,
     StateSource,
     ThreadState,
     WorkingDraft,
 )
 from app.visitor_sessions import COOKIE_NAME, Clock, CurrentVisitor, authenticate, get_clock
 from app.workspace_schemas import (
+    CaseList,
+    CaseListQuery,
+    CaseSummary,
     DatasetVersionResponse,
     IncidentContext,
     IncidentEntry,
     InvestigationCreate,
     LocalID,
+    Money,
+    ThreadKind,
     Workspace,
     WorkspaceThread,
 )
@@ -77,8 +85,13 @@ def workspace_view(db: Session, investigation: Investigation) -> Workspace:
         source["source_key"] for source in dataset.manifest["sources"]
     }:
         raise initialization_failed()
-    # These counts are configured fixture memberships for Task 3, not initialized case rows.
-    cases = [FixtureCase.model_validate(case) for case in dataset.manifest["cases"]]
+    counts = dict(
+        db.execute(
+            select(CaseThread.thread_kind, func.count())
+            .where(CaseThread.state_id == state.state_id)
+            .group_by(CaseThread.thread_kind)
+        ).all()
+    )
     labels = {thread.thread_kind: thread.presentation["label"] for thread in threads}
     if set(labels) != set(THREAD_ORDER):
         raise initialization_failed()
@@ -96,7 +109,7 @@ def workspace_view(db: Session, investigation: Investigation) -> Workspace:
             WorkspaceThread(
                 thread_kind=kind,
                 label=labels[kind],
-                case_count=sum(kind in case.thread_kinds for case in cases),
+                case_count=counts.get(kind, 0),
             )
             for kind in THREAD_ORDER
         ],
@@ -136,11 +149,13 @@ def initialize_graph(db: Session, investigation: Investigation, catalog: Inciden
         coverage = SourceCoverage.model_validate(source)
         db.add(StateSource(state_id=state.state_id, **coverage.model_dump()))
     db.flush()
+    materialize_state(db, investigation.investigation_id, initial=True)
 
 
 def checked_view(
     db: Session, request: Request, investigation: Investigation, clock: Clock
 ) -> Workspace:
+    materialize_state(db, investigation.investigation_id)
     result = workspace_view(db, investigation)
     actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
     if actor.visitor_context_id != investigation.visitor_context_id:
@@ -153,10 +168,12 @@ def create_or_resume(request: Request, incident_id: UUID, clock: Clock) -> tuple
         with Session(request.app.state.engine) as db, db.begin():
             actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
             existing = db.scalar(
-                select(Investigation).where(
+                select(Investigation)
+                .where(
                     Investigation.visitor_context_id == actor.visitor_context_id,
                     Investigation.incident_id == incident_id,
                 )
+                .with_for_update()
             )
             if existing is not None:
                 return checked_view(db, request, existing, clock), False
@@ -180,10 +197,12 @@ def create_or_resume(request: Request, incident_id: UUID, clock: Clock) -> tuple
         with Session(request.app.state.engine) as db, db.begin():
             actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
             winner = db.scalar(
-                select(Investigation).where(
+                select(Investigation)
+                .where(
                     Investigation.visitor_context_id == actor.visitor_context_id,
                     Investigation.incident_id == incident_id,
                 )
+                .with_for_update()
             )
             if winner is None:
                 raise initialization_failed() from None
@@ -236,11 +255,88 @@ def investigation_workspace(
     no_query_overrides(request)
     with Session(request.app.state.engine) as db, db.begin():
         investigation = db.scalar(
-            select(Investigation).where(
+            select(Investigation)
+            .where(
                 Investigation.investigation_id == investigation_id,
                 Investigation.visitor_context_id == visitor.visitor_context_id,
             )
+            .with_for_update()
         )
         if investigation is None:
             raise not_found()
         return checked_view(db, request, investigation, clock)
+
+
+@router.get(
+    "/investigations/{investigation_id}/threads/{thread_kind}/cases", response_model=CaseList
+)
+def thread_cases(
+    investigation_id: UUID,
+    thread_kind: ThreadKind,
+    query: Annotated[CaseListQuery, Query()],
+    request: Request,
+    visitor: CurrentVisitor,
+    clock: Annotated[Clock, Depends(get_clock)],
+):
+    with Session(request.app.state.engine) as db, db.begin():
+        investigation = db.scalar(
+            select(Investigation)
+            .where(
+                Investigation.investigation_id == investigation_id,
+                Investigation.visitor_context_id == visitor.visitor_context_id,
+            )
+            .with_for_update()
+        )
+        if investigation is None:
+            raise not_found()
+        draft = db.get(WorkingDraft, investigation_id)
+        if draft is None:
+            raise initialization_failed()
+        if draft.state_id != query.state_id:
+            raise APIError(409, "STALE_STATE", "Reload the workspace before selecting cases.")
+        if db.get(ThreadState, (draft.state_id, thread_kind)) is None:
+            raise not_found()
+        materialize_state(db, investigation_id)
+        # The same state participates in every join; local IDs alone never select data.
+        cases = db.scalars(
+            select(PaymentCase)
+            .join(
+                CaseThread,
+                (CaseThread.state_id == PaymentCase.state_id)
+                & (CaseThread.case_id == PaymentCase.case_id),
+            )
+            .where(
+                PaymentCase.state_id == query.state_id,
+                CaseThread.thread_kind == thread_kind,
+            )
+            .order_by(PaymentCase.case_reference)
+        ).all()
+        result = CaseList(
+            investigation_id=investigation_id,
+            state_id=draft.state_id,
+            draft_version=draft.draft_version,
+            thread_kind=thread_kind,
+            cases=[
+                CaseSummary(
+                    case_id=case.case_id,
+                    case_reference=case.case_reference,
+                    primary_report_record_id=case.primary_report_record_id,
+                    customer_ref=case.customer_ref,
+                    reported_order_ref=case.reported_order_ref,
+                    related_order_refs=case.related_order_refs,
+                    reported_issue=case.reported_issue,
+                    reported_money=Money(
+                        amount=str(case.reported_amount), currency=case.reported_currency
+                    )
+                    if case.reported_amount is not None
+                    else None,
+                    reported_at=case.reported_at,
+                    payment_state=case.payment_state,
+                )
+                for case in cases
+            ],
+        )
+        actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        if actor.visitor_context_id != investigation.visitor_context_id:
+            raise not_found()
+        return result

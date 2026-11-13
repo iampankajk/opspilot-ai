@@ -4,7 +4,8 @@ This increment verifies **Next.js → same-origin HTTPS API routing → FastAPI 
 Task 1 implements only migration boundary 001 from System Architecture §4.5. Task 2 now adds
 [anonymous visitor sessions](VISITOR_SESSIONS.md) on that schema. Task 3 adds migration 002,
 the validated fixture catalog, and [owned workspace initialization/retrieval](INVESTIGATION_WORKSPACES.md).
-Case/evidence persistence and the remaining investigation journey are deferred.
+Task 4A adds migration 003 and [case/evidence persistence with thread-scoped listing](CASE_PERSISTENCE.md).
+Evidence-request execution/history and the remaining investigation journey are deferred.
 
 ## Prerequisites and structure
 
@@ -66,9 +67,11 @@ Apply the schema deliberately, from `backend/`:
 .venv/bin/alembic check
 ```
 
-Current expected head: `0002_working_workspace`. Stage 001 creates `visitor_contexts`,
+Current expected head: `0003_case_evidence`. Stage 001 creates `visitor_contexts`,
 `dataset_versions`, `incidents`, and `investigations`; stage 002 adds `investigation_states`,
-`working_drafts`, `thread_states`, and `state_sources`, plus Alembic's bookkeeping. Schema
+`working_drafts`, `thread_states`, and `state_sources`; stage 003 adds `evidence_records`,
+`payment_cases`, `case_threads`, `case_evidence_links`, and `evidence_relationships`. There are
+13 domain tables plus Alembic's bookkeeping. Schema
 migrations import no fixture payloads. Startup validates the explicitly configured
 `CURRENT_DATASET_VERSION` (default approved label `synthetic-payments-v0.1`) and registers its
 immutable catalog identities idempotently. A missing/mismatched fixture fails visibly.
@@ -138,13 +141,14 @@ From `backend/`:
 
 Tests load `TEST_DATABASE_URL` from ignored `.env`. It must identify a separate dedicated
 database whose name ends in `_test`; never point it at a database containing useful work.
-Integration tests explicitly apply migration 001 there, roll back their test inserts, and
+Integration tests explicitly upgrade to the current migration head there, roll back their test inserts, and
 never drop databases/tables or run downgrades. If unset, PostgreSQL-backed checks are skipped;
 that is not evidence of database correctness. API unit tests need no database.
 
 From `frontend/`, after selecting Node 22:
 
 ```sh
+npm test
 npm run typecheck
 npm run build
 npm audit --audit-level=high

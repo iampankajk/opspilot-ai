@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { createInvestigation, loadIncident, loadWorkspace, type IncidentEntry, type Workspace } from "../lib/investigations";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createInvestigation, loadIncident, loadWorkspace, type IncidentEntry, type ThreadKind, type Workspace } from "../lib/investigations";
+
+import ThreadCases from "./case-list";
 
 export default function InvestigationPanel() {
   const [reference, setReference] = useState("INC-2026-1042");
   const [entry, setEntry] = useState<IncidentEntry | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [selected, setSelected] = useState("payment_failures");
+  const [selected, setSelected] = useState<ThreadKind>("payment_failures");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(new Set<AbortController>());
@@ -39,6 +41,10 @@ export default function InvestigationPanel() {
     if (investigation) void run(signal => loadWorkspace(investigation, signal), showWorkspace);
     const requests = pending.current;
     return () => { requests.forEach(controller => controller.abort()); requests.clear(); };
+  }, []);
+
+  const updateVersion = useCallback((version: number) => {
+    setWorkspace(current => current && version > current.draft_version ? { ...current, draft_version: version } : current);
   }, []);
 
   const incident = workspace?.incident ?? entry?.incident;
@@ -78,10 +84,10 @@ export default function InvestigationPanel() {
         <nav aria-label="Investigation threads" className="thread-nav">
           {workspace.threads.map(thread => <button key={thread.thread_kind} disabled={busy}
             aria-pressed={selected === thread.thread_kind} onClick={() => setSelected(thread.thread_kind)}>
-            {thread.label} · {thread.case_count} configured case
+            {thread.label} · {thread.case_count} case{thread.case_count === 1 ? "" : "s"}
           </button>)}
         </nav>
-        <p>Case counts come from the pinned synthetic fixture. Case and evidence views are deferred.</p>
+        <ThreadCases key={`${workspace.investigation_id}:${workspace.state_id}:${selected}`} workspace={workspace} thread={selected} onVersion={updateVersion} />
         <button disabled={busy} onClick={() => void run(signal => loadWorkspace(workspace.investigation_id, signal), showWorkspace)}>
           Reload saved workspace
         </button>
