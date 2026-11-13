@@ -33,7 +33,7 @@ def visitor(**overrides):
     return VisitorContext(**(values | overrides))
 
 
-def test_upgrade_creates_only_first_two_boundaries_and_matches_metadata(database):
+def test_upgrade_creates_only_first_three_boundaries_and_matches_metadata(database):
     engine, _ = database
     assert set(inspect(engine).get_table_names(schema="public")) == {
         "alembic_version",
@@ -45,6 +45,11 @@ def test_upgrade_creates_only_first_two_boundaries_and_matches_metadata(database
         "working_drafts",
         "thread_states",
         "state_sources",
+        "evidence_records",
+        "payment_cases",
+        "case_threads",
+        "case_evidence_links",
+        "evidence_relationships",
     }
     assert check_database(engine, expected_schema_revision()) is None
     assert check_database(engine, "a_different_revision") == "SCHEMA_NOT_READY"

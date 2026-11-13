@@ -338,6 +338,14 @@ Declare each compound FK as one SQLAlchemy `ForeignKeyConstraint`, not unrelated
 
 See [SQLAlchemy compound constraints](https://docs.sqlalchemy.org/en/20/core/constraints.html), [transaction management](https://docs.sqlalchemy.org/en/20/orm/session_transaction.html), and [Alembic autogeneration limits](https://alembic.sqlalchemy.org/en/latest/autogenerate.html). Select a compatible supported PostgreSQL DBAPI driver and exact versions during setup; that routine compatibility task does not add a service or reopen the approved persistence stack.
 
+Task 4A implements stage 003. New investigations now publish the case/evidence graph inside
+the original initialization transaction. Existing stage-002 drafts are materialized on their
+first owned workspace/resume/case access, under an investigation-row lock, using their own
+pinned dataset. This retains the owner, investigation, state, draft, and coverage rows. The
+one committed backfill advances `draft_version` once; retries do not. New initialization
+still begins at version 0. Case counts now come from persisted thread memberships. Schema
+upgrade itself imports no evidence, and stage 004 remains deferred. See [verification](CASE_PERSISTENCE.md).
+
 ### 4.6 First-slice acceptance checklist
 
 These checks are to be implemented/run in the Implementation Codex chat; none has passed merely because this contract exists.

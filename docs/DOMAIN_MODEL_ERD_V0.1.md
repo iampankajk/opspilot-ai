@@ -548,7 +548,7 @@ This is a schema proposal, not executable schema or tested application behavior.
 
 ## 18. Finalized schema details for the approved first slice
 
-Implementation staging: D-023 permits Task 3 to publish the atomic eight-table ownership/workspace subset after migration 002. It initializes exactly two threads and all nine coverage rows, while case counts come from the pinned validated manifest. Case/evidence persistence remains stage 003; query history remains stage 004. The existing 17-table first-slice target is unchanged, and the future revision-baseline FK remains deferred. Actual results live in [Project Status](PROJECT_STATUS.md).
+Implementation staging: D-023 permits Task 3 to publish the atomic eight-table ownership/workspace subset after migration 002. It initializes exactly two threads and all nine coverage rows, while case counts come from the pinned validated manifest. Task 4A implements case/evidence persistence in stage 003, bringing the implemented subset to 13 domain tables; query history remains stage 004. Existing owned states receive their pinned graph atomically without replacing the draft, with one draft-version increment for that committed backfill. The existing 17-table first-slice target is unchanged, and the future revision-baseline FK remains deferred. Actual results live in [Project Status](PROJECT_STATUS.md).
 
 The approved subset remains **17 domain tables** within the 29-table target. No separate session table, account model, AI/review table, or revision table is added. API types, TTL/security policy, exact mappings, migration groups, and acceptance checks are in [System Architecture](SYSTEM_ARCHITECTURE_V0.1.md), section 4. These are design specifications, not implemented DDL.
 

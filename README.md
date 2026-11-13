@@ -11,9 +11,9 @@ dedicated databases, explicit migrations, HTTPS, and development commands.
 
 The application has readiness checks, D-019 [anonymous visitor sessions](docs/VISITOR_SESSIONS.md),
 and [visitor-owned investigation workspaces](docs/INVESTIGATION_WORKSPACES.md), using migrations
-001–002. It validates the configured synthetic fixture and supports incident entry,
-create/resume, two threads, and durable workspace reload. Case/evidence persistence,
-investigation reviews, and AI features remain deferred.
+001–003. It validates the configured synthetic fixture and supports incident entry,
+create/resume, two threads, durable workspace reload, and [persisted thread-scoped cases](docs/CASE_PERSISTENCE.md).
+Evidence-request execution/history, investigation reviews, and AI features remain deferred.
 See [project status](docs/PROJECT_STATUS.md) and the [approved decisions](docs/DECISION_LOG.md).
 
 ## What is included

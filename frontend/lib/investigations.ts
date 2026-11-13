@@ -13,6 +13,7 @@ export type Workspace = IncidentEntry & {
 };
 
 const messages: Record<string, string> = {
+  STALE_STATE: "The selected state is stale. Reload the saved workspace below before trying again.",
   SESSION_REQUIRED: "Start or resume a demo session above, then try again.",
   SESSION_INVALID: "Your session is invalid. Explicitly start a fresh demo above to continue.",
   SESSION_EXPIRED: "Your session expired. Earlier work cannot be recovered by starting a new visitor.",
@@ -89,4 +90,51 @@ export async function createInvestigation(incidentId: string, signal?: AbortSign
 }
 export async function loadWorkspace(investigationId: string, signal?: AbortSignal): Promise<Workspace> {
   return parseWorkspace(await request(`investigations/${encodeURIComponent(investigationId)}/workspace`, signal));
+}
+
+export type ThreadKind = Workspace["threads"][number]["thread_kind"];
+export type CaseSummary = {
+  case_id: string; case_reference: string; primary_report_record_id: string;
+  customer_ref: string | null; reported_order_ref: string | null;
+  related_order_refs: { value: string; association: "direct" | "candidate" | "contextual"; basis_record_id: string }[];
+  reported_issue: string; reported_money: { amount: string; currency: string } | null;
+  reported_at: IncidentContext["incident_time"];
+  payment_state: { label: string; basis_record_ids: string[]; limitations: string[] } | null;
+  investigation_progress: "not_started";
+};
+export type CaseList = {
+  investigation_id: string; state_id: string; draft_version: number; thread_kind: ThreadKind;
+  cases: CaseSummary[];
+};
+
+export function parseCaseList(value: unknown, expected: {
+  investigation_id: string; state_id: string; thread_kind: ThreadKind;
+}): CaseList {
+  if (!object(value) || value.investigation_id !== expected.investigation_id ||
+      value.state_id !== expected.state_id || value.thread_kind !== expected.thread_kind ||
+      !Number.isInteger(value.draft_version) || (value.draft_version as number) < 0 ||
+      !Array.isArray(value.cases) || !value.cases.every(c => object(c) &&
+        [c.case_id, c.case_reference, c.primary_report_record_id, c.reported_issue].every(v => typeof v === "string") &&
+        [c.customer_ref, c.reported_order_ref].every(nullableString) && c.investigation_progress === "not_started" &&
+        Array.isArray(c.related_order_refs) && c.related_order_refs.every(r => object(r) &&
+          typeof r.value === "string" && typeof r.basis_record_id === "string" &&
+          ["direct", "candidate", "contextual"].includes(r.association as string)) &&
+        (c.reported_money === null || (object(c.reported_money) &&
+          typeof c.reported_money.amount === "string" && /^-?\d+(\.\d+)?$/.test(c.reported_money.amount) &&
+          typeof c.reported_money.currency === "string")) &&
+        object(c.reported_at) && nullableString(c.reported_at.raw) &&
+        (c.payment_state === null || (object(c.payment_state) && typeof c.payment_state.label === "string" &&
+          Array.isArray(c.payment_state.basis_record_ids) && c.payment_state.basis_record_ids.every(v => typeof v === "string") &&
+          Array.isArray(c.payment_state.limitations) && c.payment_state.limitations.every(v => typeof v === "string"))))) {
+    throw new Error("The backend returned an unexpected case-list response.");
+  }
+  return value as CaseList;
+}
+
+export async function loadCases(investigationId: string, stateId: string, thread: ThreadKind,
+  signal?: AbortSignal): Promise<CaseList> {
+  const path = `investigations/${encodeURIComponent(investigationId)}/threads/${thread}/cases?${new URLSearchParams({ state_id: stateId })}`;
+  return parseCaseList(await request(path, signal), {
+    investigation_id: investigationId, state_id: stateId, thread_kind: thread,
+  });
 }

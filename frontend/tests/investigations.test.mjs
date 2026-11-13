@@ -56,3 +56,60 @@ test("missing/duplicate threads and invalid case counts are rejected", () => {
     assert.throws(() => parseWorkspace({ ...workspace, threads }), /unexpected workspace/);
   }
 });
+
+test("thread cases require the selected state and support empty results", async () => {
+  const { loadCases } = await import("../lib/investigations.ts");
+  const data = { investigation_id: id, state_id: id, draft_version: 1, thread_kind: "possible_duplicates", cases: [] };
+  const fetch = mock.method(globalThis, "fetch", async (path, options) => {
+    assert.equal(path, `/api/v1/investigations/${id}/threads/possible_duplicates/cases?state_id=${id}`);
+    assert.equal(options.credentials, "same-origin");
+    assert.equal(options.cache, "no-store"); assert.equal(options.method, "GET");
+    assert.equal(options.body, undefined);
+    return new Response(JSON.stringify(data));
+  });
+  try { assert.deepEqual(await loadCases(id, id, "possible_duplicates"), data); }
+  finally { fetch.mock.restore(); }
+});
+
+test("case parser rejects a response for another state, investigation, or thread", async () => {
+  const { parseCaseList } = await import("../lib/investigations.ts");
+  const expected = { investigation_id: id, state_id: id, thread_kind: "payment_failures" };
+  const data = { ...expected, draft_version: 0, cases: [] };
+  for (const change of [{ state_id: "other" }, { investigation_id: "other" }, { thread_kind: "possible_duplicates" },
+    { draft_version: -1 }, { cases: null }]) {
+    assert.throws(() => parseCaseList({ ...data, ...change }, expected), /unexpected case-list/);
+  }
+  assert.deepEqual(parseCaseList(data, expected).cases, []);
+});
+
+test("reported money stays exact text and candidate order is not promoted to reported order", async () => {
+  const { parseCaseList } = await import("../lib/investigations.ts");
+  const expected = { investigation_id: id, state_id: id, thread_kind: "possible_duplicates" };
+  const c = { case_id: "case-duplicate-001", case_reference: "CASE-DUP-001", primary_report_record_id: "SYN-ZD-TICKET-002",
+    customer_ref: "SYN-CUST-002", reported_order_ref: null,
+    related_order_refs: [{ value: "SYN-ORD-002", association: "candidate", basis_record_id: "SYN-ZD-HANDOFF-001" }],
+    reported_issue: "Customer reports two charges", reported_money: { amount: "120.00", currency: "SGD" },
+    reported_at: incident.incident_time, payment_state: null, investigation_progress: "not_started" };
+  const data = { ...expected, draft_version: 0, cases: [c] };
+  assert.deepEqual(parseCaseList(data, expected).cases[0], c);
+  for (const change of [{ reported_money: { amount: 120, currency: "SGD" } },
+    { related_order_refs: [{ ...c.related_order_refs[0], association: "verified" }] },
+    { investigation_progress: "resolved" }]) {
+    assert.throws(() => parseCaseList({ ...data, cases: [{ ...c, ...change }] }, expected), /unexpected case-list/);
+  }
+});
+
+test("case failures and stale selections permit an explicit retry", async () => {
+  const { loadCases } = await import("../lib/investigations.ts");
+  let count = 0;
+  const fetch = mock.method(globalThis, "fetch", async () => {
+    count++;
+    return count === 1 ? new Response(JSON.stringify({ error: { code: "STALE_STATE" } }), { status: 409 }) :
+      new Response(JSON.stringify({ investigation_id: id, state_id: id, draft_version: 0, thread_kind: "payment_failures", cases: [] }));
+  });
+  try {
+    await assert.rejects(loadCases(id, id, "payment_failures"), error => error.code === "STALE_STATE" && /Reload/.test(error.message));
+    assert.deepEqual((await loadCases(id, id, "payment_failures")).cases, []);
+    assert.equal(count, 2);
+  } finally { fetch.mock.restore(); }
+});
