@@ -1,6 +1,6 @@
 # OpsPilot AI — System Architecture v0.1
 
-**Status:** The [Decision Log](DECISION_LOG.md) records the approved stack, anonymous cookie sessions, SQLAlchemy 2.x, Alembic, and 17-table first-slice scope (D-019–D-022). Section 4 finalizes first-slice implementation contracts under the owner's instruction; no application behavior or migrations are implemented or verified yet.
+**Status:** The [Decision Log](DECISION_LOG.md) records the approved stack and first-slice scope (D-019–D-022), plus the owner-approved Task 3 staged-initialization clarification (D-023). This document specifies the target contracts; actual implementation and verification are recorded in [Project Status](PROJECT_STATUS.md). Task 3 implements stages 001–002 and the owned workspace endpoints; the full first slice remains incomplete.
 **Scope:** Application structure, technology comparisons, component responsibilities, communication/failure paths, API boundaries, and the approved first implementation slice. This is design documentation, not an implemented system.
 
 [Domain Model](DOMAIN_MODEL_ERD_V0.1.md) owns ERDs, the 29-table target, constraints, indexes, and draft/revision persistence. [Decision Log](DECISION_LOG.md) is the approval source of truth and maps former review D1–D13 labels to canonical `D-NNN` IDs used here. [Project Status](PROJECT_STATUS.md) tracks current readiness. The approved [PRD](PRD_V0.1.md) and [UX Blueprint](UX_BLUEPRINT_V0.1.md) remain the product baseline; this split changes neither scope nor approvals.
@@ -164,7 +164,7 @@ These are internal responsibilities in one backend, not separate services or a p
 
 **Known incident → create/resume owned investigation → choose thread → list cases → inspect evidence → reload the same owned draft.**
 
-Validate/prepare the configured fixture content before database publication. For a new investigation, one transaction creates the visitor/incident association and pinned state, draft/thread/source rows, then evidence records, cases referencing their primary reports, memberships, and supported links, in FK dependency order. Nothing is exposed as ready if initialization fails. Existing fixture catalog/visitor headers can already exist. Reopening returns the existing owned investigation; the unique visitor/incident pair prevents duplicate initialization, including competing requests.
+Validate/prepare the configured fixture content before database publication. **D-023 permits the Task 3 staged workspace:** one transaction creates the visitor/incident association, pinned state, durable draft, exactly two thread states, and all nine source-coverage rows, using only migration stages 001–002. Workspace case counts are derived from the pinned validated fixture manifest and displayed as configured cases, not persisted case rows or reviewed outcomes. Case/evidence relational persistence is deferred to stage 003, and evidence-request history/execution to stage 004. Later materialization must be atomic and keep the same owned state and pinned dataset; it must not silently refresh an existing investigation. Nothing is exposed as initialized if the Task 3 transaction fails. Catalog/visitor headers committed earlier remain outside that rollback boundary. Reopening returns the existing owned workspace; the unique visitor/incident pair prevents duplicate initialization, including competing requests.
 
 Case selection and evidence inspection do not create numbered revisions. All progress is **Not started** because no findings or human reviews exist yet. Display source-supported payment states separately; never infer a bank charge from an attempt or timeout. Typed financial aggregates/analysis and Overview metrics are deferred. Render the supplied attempt/event fields from Evidence Records without needing the later typed-observation tables.
 
@@ -208,7 +208,7 @@ The Implementation Codex chat should read this document, [Domain Model](DOMAIN_M
 
 ## 4. First-slice implementation contract
 
-These are implementation details finalized for the already approved scope, not approvals of later features. The only new approval IDs are D-019–D-022 in the log. No login, recovery, AI calls, human review, annotations, numbered revisions, refresh UI, or export is included.
+These are implementation details for the approved scope; D-023 further permits the staged Task 3 initialization described in §3.2. No login, recovery, AI calls, human review, annotations, numbered revisions, refresh UI, or export is included.
 
 ### 4.1 Anonymous visitor session lifecycle and security
 

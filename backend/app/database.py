@@ -38,6 +38,10 @@ def check_database(engine: Engine, expected_revision: str) -> str | None:
                 "dataset_versions",
                 "incidents",
                 "investigations",
+                "investigation_states",
+                "working_drafts",
+                "thread_states",
+                "state_sources",
             }
             if not required <= tables:
                 return "SCHEMA_NOT_READY"

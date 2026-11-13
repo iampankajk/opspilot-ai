@@ -11,8 +11,10 @@ from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
 from app.api_errors import APIError
+from app.catalog import initialize_catalog
 from app.config import Settings
 from app.database import build_engine, check_database, expected_schema_revision
+from app.investigations import router as investigation_router
 from app.visitor_sessions import clear_session_cookie
 from app.visitor_sessions import router as visitor_router
 
@@ -46,6 +48,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.settings = settings or Settings.from_env()
         app.state.engine = build_engine(app.state.settings)
         app.state.schema_revision = expected_schema_revision()
+        app.state.catalog = None
+        app.state.catalog_error = None
+        try:
+            app.state.catalog = initialize_catalog(
+                app.state.engine, app.state.settings.current_dataset_version
+            )
+        except APIError as exc:
+            app.state.catalog_error = exc
+        except SQLAlchemyError:
+            app.state.catalog_error = APIError(
+                503, "DATABASE_UNAVAILABLE", "Database is unavailable."
+            )
         try:
             yield
         finally:
@@ -53,6 +67,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="OpsPilot AI API", version="0.1.0", lifespan=lifespan)
     app.include_router(visitor_router)
+    app.include_router(investigation_router)
 
     @app.middleware("http")
     async def api_boundary(request: Request, call_next):
@@ -140,6 +155,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else "Database is unavailable."
             )
             return error_response(request, 503, code, message)
+        if request.app.state.catalog_error:
+            raise request.app.state.catalog_error
         return HealthResponse()
 
     return app

@@ -2,8 +2,9 @@
 
 This increment verifies **Next.js → same-origin HTTPS API routing → FastAPI → PostgreSQL**.
 Task 1 implements only migration boundary 001 from System Architecture §4.5. Task 2 now adds
-[anonymous visitor sessions](VISITOR_SESSIONS.md) on the same schema. The incident
-investigation journey and fixture loading remain pending.
+[anonymous visitor sessions](VISITOR_SESSIONS.md) on that schema. Task 3 adds migration 002,
+the validated fixture catalog, and [owned workspace initialization/retrieval](INVESTIGATION_WORKSPACES.md).
+Case/evidence persistence and the remaining investigation journey are deferred.
 
 ## Prerequisites and structure
 
@@ -65,8 +66,12 @@ Apply the schema deliberately, from `backend/`:
 .venv/bin/alembic check
 ```
 
-Expected head: `0001_ownership_catalog`. It creates `visitor_contexts`, `dataset_versions`,
-`incidents`, `investigations`, and Alembic's own `alembic_version`. It imports no fixture data.
+Current expected head: `0002_working_workspace`. Stage 001 creates `visitor_contexts`,
+`dataset_versions`, `incidents`, and `investigations`; stage 002 adds `investigation_states`,
+`working_drafts`, `thread_states`, and `state_sources`, plus Alembic's bookkeeping. Schema
+migrations import no fixture payloads. Startup validates the explicitly configured
+`CURRENT_DATASET_VERSION` (default approved label `synthetic-payments-v0.1`) and registers its
+immutable catalog identities idempotently. A missing/mismatched fixture fails visibly.
 Application startup never runs `create_all` or migrations. Do not execute a destructive
 downgrade against stored work without impact review and explicit approval.
 
@@ -108,12 +113,12 @@ no visitor session. It returns no owned data and creates no visitor. Success:
 Unreachable PostgreSQL returns 503 `DATABASE_UNAVAILABLE`; a missing/outdated schema returns
 503 `SCHEMA_NOT_READY`. Errors use the documented error envelope. Responses include
 `X-Request-ID` and `Cache-Control: no-store`; neither credentials nor SQL errors are returned.
-The check requires the current migration head and all four foundation tables. It is not a
-claim that fixtures or the full investigation application are ready.
+The check requires the current migration head, all implemented tables, and the validated
+configured catalog. It does not establish case/evidence persistence or full-slice readiness.
 
 The API boundary enforces exact `PUBLIC_ORIGIN`, `X-OpsPilot-Request: 1`, JSON media
 type, and the 4 KiB limit for POSTs, including streamed bodies. No cross-origin CORS is enabled.
-The only product POST route currently implemented is visitor bootstrap. Next.js forwards `/api/v1/*` over loopback; the browser
+The product POST routes currently implemented are visitor bootstrap and owned investigation creation/resume. Next.js forwards `/api/v1/*` over loopback; the browser
 uses relative URLs over HTTPS. The page's static shell contains no owned data, and readiness
 fetches are uncached. No model calls, localStorage identity, default visitor, or owner-ID bypass
 exists. D-019's cookie/token authentication is now implemented and tested separately; the

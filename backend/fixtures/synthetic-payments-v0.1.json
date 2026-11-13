@@ -1,0 +1,448 @@
+{
+  "version_label": "synthetic-payments-v0.1",
+  "source_package_sha256": "140b5d2116e893f1b0a54ea977dad7dda797e273eaf92c510fccf58caf5f4981",
+  "incident": {
+    "incident_ref": "INC-2026-1042",
+    "title": "Payment failure rate exceeded threshold",
+    "description": null,
+    "category": null,
+    "severity": "SEV-2 (High)",
+    "region": "APAC",
+    "synthetic": true,
+    "source_alert_record_id": "SYN-PD-ALERT-001",
+    "incident_time": {
+      "role": "incident_alert",
+      "raw": "10:30 AM SGT / `2026-10-20T02:30:00Z` (second precision as specified for the alert)",
+      "timezone": "Asia/Singapore",
+      "precision": "second",
+      "utc_lower": "2026-10-20T02:30:00Z",
+      "utc_upper": "2026-10-20T02:30:00Z",
+      "missing_reason": null
+    }
+  },
+  "sources": [
+    {
+      "source_key": "incident_alert",
+      "source_name": "PagerDuty / Grafana alert",
+      "source_category": "incident_context",
+      "availability": "included",
+      "scope": "Only the records constructed in synthetic-payments-v0.1.",
+      "completeness": "unverified",
+      "limitations": [
+        "Only constructed synthetic records are included; no live source was queried."
+      ]
+    },
+    {
+      "source_key": "metrics",
+      "source_name": "Prometheus / Grafana",
+      "source_category": "incident_context",
+      "availability": "included",
+      "scope": "Only the records constructed in synthetic-payments-v0.1.",
+      "completeness": "unverified",
+      "limitations": [
+        "Only constructed synthetic records are included; no live source was queried."
+      ]
+    },
+    {
+      "source_key": "deployment_history",
+      "source_name": "Facilitator-constructed deployment timeline fixture",
+      "source_category": "incident_context",
+      "availability": "included",
+      "scope": "Only the records constructed in synthetic-payments-v0.1.",
+      "completeness": "unverified",
+      "limitations": [
+        "Only constructed synthetic records are included; no live source was queried.",
+        "Rollout timing does not establish deployment success or causation. Configuration audit history is not constructed."
+      ]
+    },
+    {
+      "source_key": "internal_payments",
+      "source_name": "Internal Payment Operations Console",
+      "source_category": "internal_payments",
+      "availability": "included",
+      "scope": "Only the records constructed in synthetic-payments-v0.1.",
+      "completeness": "unverified",
+      "limitations": [
+        "Only constructed synthetic records are included; no live source was queried."
+      ]
+    },
+    {
+      "source_key": "stripe",
+      "source_name": "Stripe synthetic provider extract",
+      "source_category": "provider",
+      "availability": "included",
+      "scope": "Only the records constructed in synthetic-payments-v0.1.",
+      "completeness": "unverified",
+      "limitations": [
+        "Only constructed synthetic records are included; no live source was queried.",
+        "Provider extract completeness is not independently verified.",
+        "Settlement and bank-posting evidence are not constructed."
+      ]
+    },
+    {
+      "source_key": "zendesk",
+      "source_name": "Zendesk",
+      "source_category": "support_tickets",
+      "availability": "included",
+      "scope": "Only the records constructed in synthetic-payments-v0.1.",
+      "completeness": "unverified",
+      "limitations": [
+        "Only constructed synthetic records are included; no live source was queried.",
+        "Only two complaint tickets are constructed; scenario complaint totals do not create additional records."
+      ]
+    },
+    {
+      "source_key": "support_lookup",
+      "source_name": "Authorized read-only customer/order lookup history",
+      "source_category": "support_tickets",
+      "availability": "included",
+      "scope": "Only the records constructed in synthetic-payments-v0.1.",
+      "completeness": "unverified",
+      "limitations": [
+        "Only constructed synthetic records are included; no live source was queried.",
+        "This is original synthetic Support lookup history, not a newly executed OpsPilot query."
+      ]
+    },
+    {
+      "source_key": "loki",
+      "source_name": "Grafana Loki",
+      "source_category": "logs_traces",
+      "availability": "included",
+      "scope": "Only the records constructed in synthetic-payments-v0.1.",
+      "completeness": "unverified",
+      "limitations": [
+        "Only constructed synthetic records are included; no live source was queried."
+      ]
+    },
+    {
+      "source_key": "tempo",
+      "source_name": "Grafana Tempo",
+      "source_category": "logs_traces",
+      "availability": "included",
+      "scope": "Only the records constructed in synthetic-payments-v0.1.",
+      "completeness": "unverified",
+      "limitations": [
+        "Only constructed synthetic records are included; no live source was queried."
+      ]
+    }
+  ],
+  "threads": [
+    {
+      "thread_kind": "payment_failures",
+      "label": "Payment failures"
+    },
+    {
+      "thread_kind": "possible_duplicates",
+      "label": "Possible duplicates"
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "case-failure-001",
+      "case_reference": "CASE-FAIL-001",
+      "primary_report_record_id": "SYN-ZD-TICKET-001",
+      "thread_kinds": [
+        "payment_failures"
+      ],
+      "evidence_record_ids": [
+        "SYN-ZD-TICKET-001",
+        "SYN-PO-ATT-001",
+        "SYN-STRIPE-FAIL-001",
+        "SYN-LOKI-FAIL-001",
+        "SYN-TEMPO-FAIL-001"
+      ]
+    },
+    {
+      "case_id": "case-duplicate-001",
+      "case_reference": "CASE-DUP-001",
+      "primary_report_record_id": "SYN-ZD-TICKET-002",
+      "thread_kinds": [
+        "possible_duplicates"
+      ],
+      "evidence_record_ids": [
+        "SYN-ZD-TICKET-002",
+        "SYN-ZD-HANDOFF-001",
+        "SYN-ZD-ESCALATION-001",
+        "SYN-PO-ATT-002-A",
+        "SYN-PO-ATT-002-B",
+        "SYN-STRIPE-DUP-001"
+      ]
+    }
+  ],
+  "incident_context_record_ids": [
+    "SYN-PD-ALERT-001",
+    "SYN-GRAF-METRIC-001",
+    "SYN-DEPLOYMENT-TIMELINE-001"
+  ],
+  "declared_gaps": [
+    "Settlement and bank-posting evidence are not constructed.",
+    "Runtime configuration audit history is not constructed; scenario status is unknown.",
+    "Network/DNS/infrastructure telemetry is not constructed.",
+    "Complete workflow logs, source diff, PR, and commit SHA are not constructed."
+  ],
+  "records": [
+    {
+      "record_id": "SYN-PD-ALERT-001",
+      "source_key": "incident_alert",
+      "payload": {
+        "Source system": "PagerDuty incident record; alert source is Grafana",
+        "Event timestamp": "10:30 AM SGT / `2026-10-20T02:30:00Z` (second precision as specified for the alert)",
+        "Provenance": "Constructed synthetic record based on the approved fictional alert scenario",
+        "Incident reference": "`INC-2026-1042` (fictional scenario identifier)",
+        "Alert title": "Payment failure rate exceeded threshold",
+        "Severity": "SEV-2 (High)",
+        "Affected service": "Payment Processing",
+        "Alert source": "Grafana",
+        "Current failure rate": "12.4%",
+        "Expected rate": "Below 2%",
+        "Measurement window": "10:25–10:30 AM SGT",
+        "Region": "APAC",
+        "Trigger time": "10:30 AM SGT / `2026-10-20T02:30:00Z`",
+        "Status": "Triggered",
+        "Links in scenario": "Grafana dashboard and troubleshooting runbook (link destinations not constructed)"
+      },
+      "raw_markdown": "### Record SYN-PD-ALERT-001 — SYNTHETIC\n\n| Field | Synthetic value |\n|---|---|\n| Source system | PagerDuty incident record; alert source is Grafana |\n| Event timestamp | 10:30 AM SGT / `2026-10-20T02:30:00Z` (second precision as specified for the alert) |\n| Provenance | Constructed synthetic record based on the approved fictional alert scenario |\n| Incident reference | `INC-2026-1042` (fictional scenario identifier) |\n| Alert title | Payment failure rate exceeded threshold |\n| Severity | SEV-2 (High) |\n| Affected service | Payment Processing |\n| Alert source | Grafana |\n| Current failure rate | 12.4% |\n| Expected rate | Below 2% |\n| Measurement window | 10:25–10:30 AM SGT |\n| Region | APAC |\n| Trigger time | 10:30 AM SGT / `2026-10-20T02:30:00Z` |\n| Status | Triggered |\n| Links in scenario | Grafana dashboard and troubleshooting runbook (link destinations not constructed) |",
+      "payload_digest": "2be97fb8d649c6c58506e8d9ec80a43f57d42266f0347dc5d57a9e00a33cad2c"
+    },
+    {
+      "record_id": "SYN-GRAF-METRIC-001",
+      "source_key": "metrics",
+      "payload": {
+        "Source system": "Prometheus metric displayed/queryable through Grafana",
+        "Event timestamps": "Five consecutive one-minute buckets, 10:25–10:30 AM SGT / `2026-10-20T02:25Z`–`2026-10-20T02:30Z` (minute precision)",
+        "Provenance": "Constructed synthetic aggregate series; not retrieved from a real monitoring system",
+        "Metric": "Payment failure rate",
+        "Window": "10:25–10:30 AM SGT / `2026-10-20T02:25Z`–`2026-10-20T02:30Z`",
+        "Region": "APAC",
+        "Per-minute series": "10:25–10:26: 16 failures / 80 attempts = 20%; 10:26–10:27: 15 / 100 = 15%; 10:27–10:28: 15 / 120 = 12.5%; 10:28–10:29: 8 / 100 = 8%; 10:29–10:30: 8 / 100 = 8%",
+        "Aggregate calculation": "62 failures / 500 attempts = 12.4% across the five buckets; calculate as total failures divided by total attempts (attempt-weighted)",
+        "Comparison threshold stated in alert": "Below 2%",
+        "Provider, method, error-code breakdown": "Not constructed",
+        "Unique-customer counts": "Not constructed",
+        "Ingestion timestamp": "Not constructed"
+      },
+      "raw_markdown": "#### Record SYN-GRAF-METRIC-001 — SYNTHETIC\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Prometheus metric displayed/queryable through Grafana |\n| Event timestamps | Five consecutive one-minute buckets, 10:25–10:30 AM SGT / `2026-10-20T02:25Z`–`2026-10-20T02:30Z` (minute precision) |\n| Provenance | Constructed synthetic aggregate series; not retrieved from a real monitoring system |\n| Metric | Payment failure rate |\n| Window | 10:25–10:30 AM SGT / `2026-10-20T02:25Z`–`2026-10-20T02:30Z` |\n| Region | APAC |\n| Per-minute series | 10:25–10:26: 16 failures / 80 attempts = 20%; 10:26–10:27: 15 / 100 = 15%; 10:27–10:28: 15 / 120 = 12.5%; 10:28–10:29: 8 / 100 = 8%; 10:29–10:30: 8 / 100 = 8% |\n| Aggregate calculation | 62 failures / 500 attempts = 12.4% across the five buckets; calculate as total failures divided by total attempts (attempt-weighted) |\n| Comparison threshold stated in alert | Below 2% |\n| Provider, method, error-code breakdown | Not constructed |\n| Unique-customer counts | Not constructed |\n| Ingestion timestamp | Not constructed |\n\nThis is a minimal synthetic trend series. It does not provide pre-window trend points or diagnostic breakdowns.",
+      "payload_digest": "8bb4fe3f789bf95f3ca8d08504c7687a8800c7b0631bd78a2e9a3fefae95812c"
+    },
+    {
+      "record_id": "SYN-ZD-TICKET-001",
+      "source_key": "zendesk",
+      "payload": {
+        "Source system": "Zendesk",
+        "Event timestamp": "Ticket-created time: 10:31 AM SGT / `2026-10-20T02:31Z` (minute precision); approximate payment time is separately customer-reported",
+        "Provenance": "Constructed synthetic ticket; identifier source is stated below, and complaint content/time are customer-reported within the fictional scenario",
+        "Ticket reference": "`SYN-ZD-TICKET-001`",
+        "Created": "10:31 AM SGT / `2026-10-20T02:31Z` (minute precision)",
+        "Reported issue": "Payment did not complete; customer reports a timeout message",
+        "Customer reference": "`SYN-CUST-001`",
+        "Order reference": "`SYN-ORD-001`",
+        "Reported amount/currency": "SGD 48.00",
+        "Approximate payment time": "10:27 AM SGT",
+        "Transaction ID supplied by customer": "None",
+        "Identifier provenance": "Customer ID and Order ID are fictional trusted portal fields; complaint and approximate time are customer-reported"
+      },
+      "raw_markdown": "#### Record SYN-ZD-TICKET-001 — SYNTHETIC, representative failure complaint\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Zendesk |\n| Event timestamp | Ticket-created time: 10:31 AM SGT / `2026-10-20T02:31Z` (minute precision); approximate payment time is separately customer-reported |\n| Provenance | Constructed synthetic ticket; identifier source is stated below, and complaint content/time are customer-reported within the fictional scenario |\n| Ticket reference | `SYN-ZD-TICKET-001` |\n| Created | 10:31 AM SGT / `2026-10-20T02:31Z` (minute precision) |\n| Reported issue | Payment did not complete; customer reports a timeout message |\n| Customer reference | `SYN-CUST-001` |\n| Order reference | `SYN-ORD-001` |\n| Reported amount/currency | SGD 48.00 |\n| Approximate payment time | 10:27 AM SGT |\n| Transaction ID supplied by customer | None |\n| Identifier provenance | Customer ID and Order ID are fictional trusted portal fields; complaint and approximate time are customer-reported |",
+      "payload_digest": "48c9aed9b049e553925baa72e0957bbde2f942c391edb4f937e866460acaf991"
+    },
+    {
+      "record_id": "SYN-ZD-TICKET-002",
+      "source_key": "zendesk",
+      "payload": {
+        "Source system": "Zendesk",
+        "Event timestamp": "Ticket-created time: 10:33 AM SGT / `2026-10-20T02:33Z` (minute precision); approximate payment time is separately customer-reported",
+        "Provenance": "Constructed synthetic ticket; identifier source is stated below, and complaint content/time are customer-reported within the fictional scenario",
+        "Ticket reference": "`SYN-ZD-TICKET-002`",
+        "Created": "10:33 AM SGT / `2026-10-20T02:33Z` (minute precision)",
+        "Reported issue": "Customer reports seeing two charges for one purchase",
+        "Customer reference": "`SYN-CUST-002`",
+        "Order reference": "Not supplied in the ticket",
+        "Reported amount/currency": "SGD 120.00",
+        "Approximate payment time": "10:17–10:18 AM SGT",
+        "Transaction ID supplied by customer": "None",
+        "Identifier provenance": "Customer ID is a fictional trusted portal field; amount and approximate time are customer-reported",
+        "Bank/issuer evidence": "Not supplied; posting status unknown"
+      },
+      "raw_markdown": "#### Record SYN-ZD-TICKET-002 — SYNTHETIC, possible-duplicate complaint\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Zendesk |\n| Event timestamp | Ticket-created time: 10:33 AM SGT / `2026-10-20T02:33Z` (minute precision); approximate payment time is separately customer-reported |\n| Provenance | Constructed synthetic ticket; identifier source is stated below, and complaint content/time are customer-reported within the fictional scenario |\n| Ticket reference | `SYN-ZD-TICKET-002` |\n| Created | 10:33 AM SGT / `2026-10-20T02:33Z` (minute precision) |\n| Reported issue | Customer reports seeing two charges for one purchase |\n| Customer reference | `SYN-CUST-002` |\n| Order reference | Not supplied in the ticket |\n| Reported amount/currency | SGD 120.00 |\n| Approximate payment time | 10:17–10:18 AM SGT |\n| Transaction ID supplied by customer | None |\n| Identifier provenance | Customer ID is a fictional trusted portal field; amount and approximate time are customer-reported |\n| Bank/issuer evidence | Not supplied; posting status unknown |",
+      "payload_digest": "8d3fd5a705dbacfc4ff8674573689566e1db34f997dfe601b0f9e4df29154c36"
+    },
+    {
+      "record_id": "SYN-ZD-HANDOFF-001",
+      "source_key": "support_lookup",
+      "payload": {
+        "Source system": "Authorized read-only customer/order lookup interface; history attached to the synthetic Zendesk handoff",
+        "Event timestamp": "Lookup event: 10:36 AM SGT / `2026-10-20T02:36Z` (minute precision)",
+        "Provenance": "Constructed synthetic Support lookup history; search/results are fictional exercise data",
+        "Related ticket": "`SYN-ZD-TICKET-002`",
+        "Search time": "10:36 AM SGT / `2026-10-20T02:36Z` (minute precision)",
+        "Search criteria": "Customer `SYN-CUST-002`; SGD 120.00; 10:00–10:30 AM SGT",
+        "Source searched": "Authorized read-only customer/order lookup interface",
+        "Candidate records returned": "`SYN-PO-ATT-002-A`, `SYN-PO-ATT-002-B`",
+        "Search result": "Two attempts associated with one candidate order, `SYN-ORD-002`"
+      },
+      "raw_markdown": "#### Record SYN-ZD-HANDOFF-001 — SYNTHETIC Support lookup history\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Authorized read-only customer/order lookup interface; history attached to the synthetic Zendesk handoff |\n| Event timestamp | Lookup event: 10:36 AM SGT / `2026-10-20T02:36Z` (minute precision) |\n| Provenance | Constructed synthetic Support lookup history; search/results are fictional exercise data |\n| Related ticket | `SYN-ZD-TICKET-002` |\n| Search time | 10:36 AM SGT / `2026-10-20T02:36Z` (minute precision) |\n| Search criteria | Customer `SYN-CUST-002`; SGD 120.00; 10:00–10:30 AM SGT |\n| Source searched | Authorized read-only customer/order lookup interface |\n| Candidate records returned | `SYN-PO-ATT-002-A`, `SYN-PO-ATT-002-B` |\n| Search result | Two attempts associated with one candidate order, `SYN-ORD-002` |",
+      "payload_digest": "c4ce284c0a40ce20167f39cb1d7db9adb978f974216d120b5207120bc32a1c72"
+    },
+    {
+      "record_id": "SYN-ZD-ESCALATION-001",
+      "source_key": "zendesk",
+      "payload": {
+        "Source system": "Zendesk",
+        "Event timestamp": "Escalation event: 10:40 AM SGT / `2026-10-20T02:40Z` (minute precision)",
+        "Provenance": "Constructed synthetic Support escalation packet; its intentional omission is an exercise condition, not an observed company behavior",
+        "Related ticket": "`SYN-ZD-TICKET-002`",
+        "Escalated": "10:40 AM SGT / `2026-10-20T02:40Z` (minute precision)",
+        "Included": "Ticket reference, Customer ID, reported amount/currency, approximate payment time, customer-reported issue",
+        "Omitted from packet": "Prior search criteria, systems searched, candidate order/attempt references, lookup result"
+      },
+      "raw_markdown": "#### Record SYN-ZD-ESCALATION-001 — SYNTHETIC Support escalation packet\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Zendesk |\n| Event timestamp | Escalation event: 10:40 AM SGT / `2026-10-20T02:40Z` (minute precision) |\n| Provenance | Constructed synthetic Support escalation packet; its intentional omission is an exercise condition, not an observed company behavior |\n| Related ticket | `SYN-ZD-TICKET-002` |\n| Escalated | 10:40 AM SGT / `2026-10-20T02:40Z` (minute precision) |\n| Included | Ticket reference, Customer ID, reported amount/currency, approximate payment time, customer-reported issue |\n| Omitted from packet | Prior search criteria, systems searched, candidate order/attempt references, lookup result |\n\nThe omission is an intentional **synthetic exercise condition**, not an observed company behavior. The underlying Support lookup history is separately discoverable. It allows the participant to determine whether a later lookup is a repeat, an extension, necessary independent verification, or unclear.",
+      "payload_digest": "04fc3a1dcc5cf03f87cc647738dcdc2fe5ba7e0e04c8814b310a06126ecce74f"
+    },
+    {
+      "record_id": "SYN-PO-ATT-001",
+      "source_key": "internal_payments",
+      "payload": {
+        "Source system": "Internal Payment Operations Console",
+        "Event timestamp": "Payment attempt event: 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision)",
+        "Provenance": "Constructed synthetic transaction record; identifiers and values are fictional",
+        "Transaction / attempt": "`SYN-TXN-001` / `SYN-PO-ATT-001`",
+        "Customer / order": "`SYN-CUST-001` / `SYN-ORD-001`",
+        "Amount/currency": "SGD 48.00",
+        "Event time": "10:27 AM SGT / `2026-10-20T02:27Z` (minute precision)",
+        "Internal status": "Outcome unknown after timeout",
+        "Sanitized internal error": "`PROVIDER_REQUEST_TIMEOUT`",
+        "Provider reference / request": "`SYN-PI-FAIL-001` / `SYN-REQ-FAIL-001`",
+        "Trace reference": "`SYN-TRACE-FAIL-001`",
+        "Application version field": "`v2.8.1` (synthetic; inherited from the previously discussed fictional rollout assumption)",
+        "Idempotency/retry detail": "Not constructed for this attempt"
+      },
+      "raw_markdown": "#### Record SYN-PO-ATT-001 — SYNTHETIC failure-path attempt\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Internal Payment Operations Console |\n| Event timestamp | Payment attempt event: 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision) |\n| Provenance | Constructed synthetic transaction record; identifiers and values are fictional |\n| Transaction / attempt | `SYN-TXN-001` / `SYN-PO-ATT-001` |\n| Customer / order | `SYN-CUST-001` / `SYN-ORD-001` |\n| Amount/currency | SGD 48.00 |\n| Event time | 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision) |\n| Internal status | Outcome unknown after timeout |\n| Sanitized internal error | `PROVIDER_REQUEST_TIMEOUT` |\n| Provider reference / request | `SYN-PI-FAIL-001` / `SYN-REQ-FAIL-001` |\n| Trace reference | `SYN-TRACE-FAIL-001` |\n| Application version field | `v2.8.1` (synthetic; inherited from the previously discussed fictional rollout assumption) |\n| Idempotency/retry detail | Not constructed for this attempt |",
+      "payload_digest": "d0830cc350c3cbb8f3632b361fa8e9f06c1d7f524d0f5505f0dfd599c5649547"
+    },
+    {
+      "record_id": "SYN-PO-ATT-002-A",
+      "source_key": "internal_payments",
+      "payload": {
+        "Source system": "Internal Payment Operations Console",
+        "Event timestamp / timezone / precision": "10:17 AM SGT / `2026-10-20T02:17Z`, minute precision",
+        "Provenance": "Constructed synthetic transaction record",
+        "Transaction / attempt": "`SYN-TXN-002` / `SYN-PO-ATT-002-A`",
+        "Customer / order": "`SYN-CUST-002` / `SYN-ORD-002`",
+        "Amount/currency": "SGD 120.00",
+        "Event time": "10:17 AM SGT / `2026-10-20T02:17Z` (minute precision)",
+        "Internal attempt status": "Timeout; provider outcome initially unknown",
+        "Provider reference": "`SYN-PI-DUP-001`",
+        "Provider request reference": "`SYN-REQ-DUP-A`",
+        "Idempotency key": "`SYN-IDEM-DUP-001`",
+        "Capture reference": "Not present on this attempt row"
+      },
+      "raw_markdown": "#### Records SYN-PO-ATT-002-A and SYN-PO-ATT-002-B — SYNTHETIC possible-duplicate path\n\n| Field | `SYN-PO-ATT-002-A` | `SYN-PO-ATT-002-B` |\n|---|---|---|\n| Source system | Internal Payment Operations Console | Internal Payment Operations Console |\n| Event timestamp / timezone / precision | 10:17 AM SGT / `2026-10-20T02:17Z`, minute precision | 10:18 AM SGT / `2026-10-20T02:18Z`, minute precision |\n| Provenance | Constructed synthetic transaction record | Constructed synthetic transaction record |\n| Transaction / attempt | `SYN-TXN-002` / `SYN-PO-ATT-002-A` | `SYN-TXN-002` / `SYN-PO-ATT-002-B` |\n| Customer / order | `SYN-CUST-002` / `SYN-ORD-002` | `SYN-CUST-002` / `SYN-ORD-002` |\n| Amount/currency | SGD 120.00 | SGD 120.00 |\n| Event time | 10:17 AM SGT / `2026-10-20T02:17Z` (minute precision) | 10:18 AM SGT / `2026-10-20T02:18Z` (minute precision) |\n| Internal attempt status | Timeout; provider outcome initially unknown | Succeeded |\n| Provider reference | `SYN-PI-DUP-001` | `SYN-PI-DUP-001` |\n| Provider request reference | `SYN-REQ-DUP-A` | `SYN-REQ-DUP-B` |\n| Idempotency key | `SYN-IDEM-DUP-001` | `SYN-IDEM-DUP-001` |\n| Capture reference | Not present on this attempt row | `SYN-CAP-DUP-001` |\n\nThese synthetic records intentionally distinguish two attempts from provider capture events. They do not state a conclusion about the customer's bank posting.",
+      "payload_digest": "6e7ce1751a6daf7cb523e9c9ae478604293667d654f4cf48179c478f34c55d69"
+    },
+    {
+      "record_id": "SYN-PO-ATT-002-B",
+      "source_key": "internal_payments",
+      "payload": {
+        "Source system": "Internal Payment Operations Console",
+        "Event timestamp / timezone / precision": "10:18 AM SGT / `2026-10-20T02:18Z`, minute precision",
+        "Provenance": "Constructed synthetic transaction record",
+        "Transaction / attempt": "`SYN-TXN-002` / `SYN-PO-ATT-002-B`",
+        "Customer / order": "`SYN-CUST-002` / `SYN-ORD-002`",
+        "Amount/currency": "SGD 120.00",
+        "Event time": "10:18 AM SGT / `2026-10-20T02:18Z` (minute precision)",
+        "Internal attempt status": "Succeeded",
+        "Provider reference": "`SYN-PI-DUP-001`",
+        "Provider request reference": "`SYN-REQ-DUP-B`",
+        "Idempotency key": "`SYN-IDEM-DUP-001`",
+        "Capture reference": "`SYN-CAP-DUP-001`"
+      },
+      "raw_markdown": "#### Records SYN-PO-ATT-002-A and SYN-PO-ATT-002-B — SYNTHETIC possible-duplicate path\n\n| Field | `SYN-PO-ATT-002-A` | `SYN-PO-ATT-002-B` |\n|---|---|---|\n| Source system | Internal Payment Operations Console | Internal Payment Operations Console |\n| Event timestamp / timezone / precision | 10:17 AM SGT / `2026-10-20T02:17Z`, minute precision | 10:18 AM SGT / `2026-10-20T02:18Z`, minute precision |\n| Provenance | Constructed synthetic transaction record | Constructed synthetic transaction record |\n| Transaction / attempt | `SYN-TXN-002` / `SYN-PO-ATT-002-A` | `SYN-TXN-002` / `SYN-PO-ATT-002-B` |\n| Customer / order | `SYN-CUST-002` / `SYN-ORD-002` | `SYN-CUST-002` / `SYN-ORD-002` |\n| Amount/currency | SGD 120.00 | SGD 120.00 |\n| Event time | 10:17 AM SGT / `2026-10-20T02:17Z` (minute precision) | 10:18 AM SGT / `2026-10-20T02:18Z` (minute precision) |\n| Internal attempt status | Timeout; provider outcome initially unknown | Succeeded |\n| Provider reference | `SYN-PI-DUP-001` | `SYN-PI-DUP-001` |\n| Provider request reference | `SYN-REQ-DUP-A` | `SYN-REQ-DUP-B` |\n| Idempotency key | `SYN-IDEM-DUP-001` | `SYN-IDEM-DUP-001` |\n| Capture reference | Not present on this attempt row | `SYN-CAP-DUP-001` |\n\nThese synthetic records intentionally distinguish two attempts from provider capture events. They do not state a conclusion about the customer's bank posting.",
+      "payload_digest": "be5949232238a0fb4ed9da5faad60ac088745222f400bd90c123caf0effb1847"
+    },
+    {
+      "record_id": "SYN-STRIPE-FAIL-001",
+      "source_key": "stripe",
+      "payload": {
+        "Source system": "Stripe provider event/dashboard extract (synthetic fixture)",
+        "Event timestamp": "Returned event time: 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision)",
+        "Provenance": "Constructed synthetic provider record; no real Stripe data was accessed",
+        "Payment Intent": "`SYN-PI-FAIL-001`",
+        "Related provider request": "`SYN-REQ-FAIL-001`",
+        "Event time": "10:27 AM SGT / `2026-10-20T02:27Z` (minute precision)",
+        "Provider Payment Intent status observed in the returned synthetic extract": "Processing",
+        "Capture event in this returned extract": "None present",
+        "Extract completeness": "**Not independently verified.** Completeness of the returned Payment Intent event set through 10:30 AM is unknown; absence of a capture in this returned extract does not prove no additional capture existed",
+        "Settlement/bank posting evidence": "Not constructed"
+      },
+      "raw_markdown": "#### Record SYN-STRIPE-FAIL-001 — SYNTHETIC, failure path\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Stripe provider event/dashboard extract (synthetic fixture) |\n| Event timestamp | Returned event time: 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision) |\n| Provenance | Constructed synthetic provider record; no real Stripe data was accessed |\n| Payment Intent | `SYN-PI-FAIL-001` |\n| Related provider request | `SYN-REQ-FAIL-001` |\n| Event time | 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision) |\n| Provider Payment Intent status observed in the returned synthetic extract | Processing |\n| Capture event in this returned extract | None present |\n| Extract completeness | **Not independently verified.** Completeness of the returned Payment Intent event set through 10:30 AM is unknown; absence of a capture in this returned extract does not prove no additional capture existed |\n| Settlement/bank posting evidence | Not constructed |",
+      "payload_digest": "28a9786a63ce90f6b4fefd28d7bc9bc85bc0a8d66fffef846efe6c99dd6308d0"
+    },
+    {
+      "record_id": "SYN-STRIPE-DUP-001",
+      "source_key": "stripe",
+      "payload": {
+        "Source system": "Stripe provider event/dashboard extract (synthetic fixture)",
+        "Event timestamps": "Listed event times are SGT / UTC at minute precision; returned event-set scope is through 10:30 AM SGT",
+        "Provenance": "Constructed synthetic provider record; no real Stripe data was accessed",
+        "Payment Intent": "`SYN-PI-DUP-001`",
+        "Related internal attempts": "`SYN-PO-ATT-002-A`, `SYN-PO-ATT-002-B`",
+        "Provider requests": "`SYN-REQ-DUP-A`, `SYN-REQ-DUP-B`",
+        "Idempotency key shown on both requests": "`SYN-IDEM-DUP-001`",
+        "Returned lifecycle events": "Two request/attempt references; one authorization reference `SYN-AUTH-DUP-001`; one capture reference `SYN-CAP-DUP-001` for SGD 120.00",
+        "Capture event time": "10:18 AM SGT / `2026-10-20T02:18Z` (minute precision)",
+        "Other event-specific timestamps": "Not constructed",
+        "Reversal/refund event in returned extract": "None present",
+        "Extract scope and completeness": "Returned Payment Intent event set through 10:30 AM SGT; **completeness has not been independently verified**. One capture reference is present in the returned set, but this does not prove that no additional capture existed",
+        "Settlement/bank posting evidence": "Not constructed"
+      },
+      "raw_markdown": "#### Record SYN-STRIPE-DUP-001 — SYNTHETIC, possible-duplicate path\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Stripe provider event/dashboard extract (synthetic fixture) |\n| Event timestamps | Listed event times are SGT / UTC at minute precision; returned event-set scope is through 10:30 AM SGT |\n| Provenance | Constructed synthetic provider record; no real Stripe data was accessed |\n| Payment Intent | `SYN-PI-DUP-001` |\n| Related internal attempts | `SYN-PO-ATT-002-A`, `SYN-PO-ATT-002-B` |\n| Provider requests | `SYN-REQ-DUP-A`, `SYN-REQ-DUP-B` |\n| Idempotency key shown on both requests | `SYN-IDEM-DUP-001` |\n| Returned lifecycle events | Two request/attempt references; one authorization reference `SYN-AUTH-DUP-001`; one capture reference `SYN-CAP-DUP-001` for SGD 120.00 |\n| Capture event time | 10:18 AM SGT / `2026-10-20T02:18Z` (minute precision) |\n| Other event-specific timestamps | Not constructed |\n| Reversal/refund event in returned extract | None present |\n| Extract scope and completeness | Returned Payment Intent event set through 10:30 AM SGT; **completeness has not been independently verified**. One capture reference is present in the returned set, but this does not prove that no additional capture existed |\n| Settlement/bank posting evidence | Not constructed |\n\nThe record gives the participant lifecycle evidence to assess; it contains no facilitator-authored conclusion. Provider capture evidence is not issuer/bank posting evidence. Settlement and bank-posting status remain unknown.",
+      "payload_digest": "838f4c2b998ff14f84de4a086931341556cf7c6edddfa67dd1a054a09daa5a59"
+    },
+    {
+      "record_id": "SYN-LOKI-FAIL-001",
+      "source_key": "loki",
+      "payload": {
+        "Source system": "Grafana Loki (application log)",
+        "Event timestamp": "10:27 AM SGT / `2026-10-20T02:27Z` (minute precision)",
+        "Provenance": "Constructed synthetic structured log; not retrieved from a real logging system",
+        "Event time": "10:27 AM SGT / `2026-10-20T02:27Z` (minute precision)",
+        "Service/region": "Payment Processing / APAC",
+        "Attempt / provider request": "`SYN-PO-ATT-001` / `SYN-REQ-FAIL-001`",
+        "Trace ID": "`SYN-TRACE-FAIL-001`",
+        "Application version": "`v2.8.1` (synthetic; inherited fictional assumption)",
+        "Sanitized event": "Application recorded a timeout while awaiting the provider request outcome",
+        "Provider response body": "Not present in this application log",
+        "Ingestion timestamp": "Not constructed"
+      },
+      "raw_markdown": "#### Record SYN-LOKI-FAIL-001 — SYNTHETIC\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Grafana Loki (application log) |\n| Event timestamp | 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision) |\n| Provenance | Constructed synthetic structured log; not retrieved from a real logging system |\n| Event time | 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision) |\n| Service/region | Payment Processing / APAC |\n| Attempt / provider request | `SYN-PO-ATT-001` / `SYN-REQ-FAIL-001` |\n| Trace ID | `SYN-TRACE-FAIL-001` |\n| Application version | `v2.8.1` (synthetic; inherited fictional assumption) |\n| Sanitized event | Application recorded a timeout while awaiting the provider request outcome |\n| Provider response body | Not present in this application log |\n| Ingestion timestamp | Not constructed |",
+      "payload_digest": "bf716a1914c875e223cd8b0d79eb212e7cd7d4e72d13f9233edc9c1c4f7443c8"
+    },
+    {
+      "record_id": "SYN-TEMPO-FAIL-001",
+      "source_key": "tempo",
+      "payload": {
+        "Source system": "Grafana Tempo (distributed trace)",
+        "Event timestamp": "10:27 AM SGT / `2026-10-20T02:27Z` (minute precision)",
+        "Provenance": "Constructed synthetic trace; not retrieved from a real tracing system",
+        "Trace ID": "`SYN-TRACE-FAIL-001`",
+        "Related attempt/request": "`SYN-PO-ATT-001` / `SYN-REQ-FAIL-001`",
+        "Event time": "10:27 AM SGT / `2026-10-20T02:27Z` (minute precision)",
+        "Application span result": "Deadline exceeded while awaiting outbound provider request result",
+        "Application version": "`v2.8.1` (synthetic; inherited fictional assumption)",
+        "Provider-side span": "Not present in this trace",
+        "Ingestion timestamp": "Not constructed"
+      },
+      "raw_markdown": "#### Record SYN-TEMPO-FAIL-001 — SYNTHETIC\n\n| Field | Synthetic value |\n|---|---|\n| Source system | Grafana Tempo (distributed trace) |\n| Event timestamp | 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision) |\n| Provenance | Constructed synthetic trace; not retrieved from a real tracing system |\n| Trace ID | `SYN-TRACE-FAIL-001` |\n| Related attempt/request | `SYN-PO-ATT-001` / `SYN-REQ-FAIL-001` |\n| Event time | 10:27 AM SGT / `2026-10-20T02:27Z` (minute precision) |\n| Application span result | Deadline exceeded while awaiting outbound provider request result |\n| Application version | `v2.8.1` (synthetic; inherited fictional assumption) |\n| Provider-side span | Not present in this trace |\n| Ingestion timestamp | Not constructed |\n\nThe log and trace link to one another through the explicit trace/request identifiers. Their contents do not distinguish provider delay, regional connectivity, or application behavior as the root cause.",
+      "payload_digest": "30139ba0986f020c7ef7ee2a4bd8276cfc2b9d041ac15292a654d8a5f1e662c8"
+    },
+    {
+      "record_id": "SYN-DEPLOYMENT-TIMELINE-001",
+      "source_key": "deployment_history",
+      "payload": {
+        "source_provenance": "**Source/provenance:** Facilitator-constructed deployment timeline fixture, not an independently retrieved release-ledger record. The event times below are SGT, mapped to UTC at minute precision.",
+        "timeline_markdown": "#### Record SYN-DEPLOYMENT-TIMELINE-001 — SYNTHETIC fixture\n\n**Source/provenance:** Facilitator-constructed deployment timeline fixture, not an independently retrieved release-ledger record. The event times below are SGT, mapped to UTC at minute precision.\n\n| Event | SGT | UTC (minute precision) |\n|---|---|---|\n| Rolling deployment starts | 10:12 AM | `2026-10-20T02:12Z` |\n| Old version `v2.8.0` / new version `v2.8.1` overlap | 10:15–10:18 AM | `2026-10-20T02:15Z`–`2026-10-20T02:18Z` |\n| Fictional rollout window ends (deployment success not independently verified) | 10:20 AM | `2026-10-20T02:20Z` |\n\nThis reuses the previously discussed fictional timing and version mapping only. The end of the rollout window is not evidence of independently verified deployment success. No commit SHA, pull request, workflow-run ID, actor, target service/environment/region scope, deployment success telemetry, or rollback fact is added here. Temporal proximity does not establish causation.\n\n**Configuration audit history: not constructed.** A request for a runtime configuration or feature-flag change record receives “not constructed; scenario status unknown.” This does not imply that no change occurred."
+      },
+      "raw_markdown": "#### Record SYN-DEPLOYMENT-TIMELINE-001 — SYNTHETIC fixture\n\n**Source/provenance:** Facilitator-constructed deployment timeline fixture, not an independently retrieved release-ledger record. The event times below are SGT, mapped to UTC at minute precision.\n\n| Event | SGT | UTC (minute precision) |\n|---|---|---|\n| Rolling deployment starts | 10:12 AM | `2026-10-20T02:12Z` |\n| Old version `v2.8.0` / new version `v2.8.1` overlap | 10:15–10:18 AM | `2026-10-20T02:15Z`–`2026-10-20T02:18Z` |\n| Fictional rollout window ends (deployment success not independently verified) | 10:20 AM | `2026-10-20T02:20Z` |\n\nThis reuses the previously discussed fictional timing and version mapping only. The end of the rollout window is not evidence of independently verified deployment success. No commit SHA, pull request, workflow-run ID, actor, target service/environment/region scope, deployment success telemetry, or rollback fact is added here. Temporal proximity does not establish causation.\n\n**Configuration audit history: not constructed.** A request for a runtime configuration or feature-flag change record receives “not constructed; scenario status unknown.” This does not imply that no change occurred.",
+      "payload_digest": "867f1bead4f691fd2505697a8b9a2f66afa22261bbe3dcee734b9842e7c64397"
+    }
+  ]
+}

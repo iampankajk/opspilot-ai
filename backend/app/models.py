@@ -2,9 +2,12 @@ from datetime import datetime
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
+    Integer,
     LargeBinary,
     MetaData,
     String,
@@ -88,3 +91,87 @@ class Investigation(Base):
         ForeignKey("incidents.incident_id", ondelete="RESTRICT"), index=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class InvestigationState(Base):
+    __tablename__ = "investigation_states"
+    __table_args__ = (UniqueConstraint("state_id", "investigation_id"),)
+
+    state_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    investigation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("investigations.investigation_id", ondelete="RESTRICT"), index=True
+    )
+    dataset_version_id: Mapped[UUID] = mapped_column(
+        ForeignKey("dataset_versions.dataset_version_id", ondelete="RESTRICT")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    incident_context: Mapped[dict] = mapped_column(JSONB)
+    limitations: Mapped[list] = mapped_column(JSONB)
+
+
+class WorkingDraft(Base):
+    __tablename__ = "working_drafts"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "investigation_id"],
+            ["investigation_states.state_id", "investigation_states.investigation_id"],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("draft_version >= 0", name="nonnegative_version"),
+    )
+
+    investigation_id: Mapped[UUID] = mapped_column(
+        ForeignKey("investigations.investigation_id", ondelete="RESTRICT"), primary_key=True
+    )
+    state_id: Mapped[UUID] = mapped_column(unique=True)
+    draft_version: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    has_unversioned_changes: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default="true"
+    )
+    persisted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class ThreadState(Base):
+    __tablename__ = "thread_states"
+    __table_args__ = (
+        CheckConstraint(
+            "thread_kind IN ('payment_failures', 'possible_duplicates')", name="thread_kind"
+        ),
+    )
+
+    state_id: Mapped[UUID] = mapped_column(
+        ForeignKey("investigation_states.state_id", ondelete="RESTRICT"), primary_key=True
+    )
+    thread_kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    summary: Mapped[str | None] = mapped_column(Text)
+    limitations: Mapped[list] = mapped_column(JSONB)
+    unresolved_questions: Mapped[list] = mapped_column(JSONB)
+    presentation: Mapped[dict] = mapped_column(JSONB)
+
+
+class StateSource(Base):
+    __tablename__ = "state_sources"
+    __table_args__ = (
+        CheckConstraint(
+            "availability IN ('included', 'not_included', 'not_constructed', 'unavailable')",
+            name="availability",
+        ),
+        CheckConstraint(
+            "completeness IN ('unverified', 'known_partial', "
+            "'verified_for_stated_scope', 'not_applicable')",
+            name="completeness",
+        ),
+    )
+
+    state_id: Mapped[UUID] = mapped_column(
+        ForeignKey("investigation_states.state_id", ondelete="RESTRICT"), primary_key=True
+    )
+    source_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    source_name: Mapped[str] = mapped_column(Text)
+    source_category: Mapped[str] = mapped_column(Text)
+    availability: Mapped[str] = mapped_column(Text)
+    scope: Mapped[str | None] = mapped_column(Text)
+    completeness: Mapped[str] = mapped_column(Text)
+    limitations: Mapped[list] = mapped_column(JSONB)

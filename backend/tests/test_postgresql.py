@@ -33,7 +33,7 @@ def visitor(**overrides):
     return VisitorContext(**(values | overrides))
 
 
-def test_upgrade_creates_only_first_boundary_and_matches_metadata(database):
+def test_upgrade_creates_only_first_two_boundaries_and_matches_metadata(database):
     engine, _ = database
     assert set(inspect(engine).get_table_names(schema="public")) == {
         "alembic_version",
@@ -41,6 +41,10 @@ def test_upgrade_creates_only_first_boundary_and_matches_metadata(database):
         "dataset_versions",
         "incidents",
         "investigations",
+        "investigation_states",
+        "working_drafts",
+        "thread_states",
+        "state_sources",
     }
     assert check_database(engine, expected_schema_revision()) is None
     assert check_database(engine, "a_different_revision") == "SCHEMA_NOT_READY"
@@ -77,7 +81,18 @@ def test_owner_incident_pair_is_unique_but_visitors_are_independent(session):
             )
         )
         session.flush()
-    assert len(session.scalars(select(Investigation)).all()) == 2
+    assert (
+        len(
+            session.scalars(
+                select(Investigation).where(
+                    Investigation.visitor_context_id.in_(
+                        [first.visitor_context_id, second.visitor_context_id]
+                    )
+                )
+            ).all()
+        )
+        == 2
+    )
 
 
 @pytest.mark.parametrize(

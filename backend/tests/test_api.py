@@ -9,9 +9,10 @@ from app.main import create_app
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     # Unit tests never connect to this address. Readiness outcomes are patched explicitly.
     app = create_app(Settings(database_url="postgresql+psycopg://localhost/unused"))
+    monkeypatch.setattr("app.main.initialize_catalog", lambda *args: None)
 
     class TestPayload(BaseModel):
         model_config = ConfigDict(extra="forbid")
@@ -83,10 +84,10 @@ def test_body_limit_covers_stream_without_content_length(client):
     assert response.status_code == 413
 
 
-def test_unknown_product_routes_do_not_return_demo_identity(client):
+def test_workspace_route_requires_authentication_before_lookup(client):
     response = client.get("/api/v1/investigations/unknown/workspace")
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "NOT_FOUND"
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "SESSION_REQUIRED"
 
 
 def test_browser_harness_routes_are_not_mounted_in_application(client):

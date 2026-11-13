@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { bootstrapVisitorSession, type VisitorSession } from "../lib/visitor-session";
 
-export default function VisitorSessionPanel() {
+export default function VisitorSessionPanel({ onNewSession }: { onNewSession?: () => void }) {
   const [busy, setBusy] = useState(false);
   const [session, setSession] = useState<VisitorSession | null>(null);
   const [message, setMessage] = useState("No demo session has been started on this page.");
@@ -13,6 +13,7 @@ export default function VisitorSessionPanel() {
     try {
       const result = await bootstrapVisitorSession();
       setSession(result.session);
+      if (result.created) onNewSession?.();
       setMessage(result.created ? "New anonymous demo session created." : "Existing demo session reused; expiry unchanged.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Unable to initialize session. Try again.");
