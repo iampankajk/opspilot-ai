@@ -1,2 +1,18 @@
 prompts
 .DS_Store
+
+# Local configuration, credentials, certificates, and runtime output
+.env
+.env.*
+!.env.example
+.certs/
+.local/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+node_modules/
+.next/
+*.tsbuildinfo

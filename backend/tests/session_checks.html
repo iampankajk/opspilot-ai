@@ -1,0 +1,62 @@
+<!doctype html><html lang="en"><meta charset="utf-8">
+<title>D-019 browser checks</title>
+<style>body{font:17px system-ui;max-width:850px;margin:40px auto;padding:20px}
+li{margin:12px 0}button{font:inherit;padding:12px}#result{font-weight:bold}</style>
+<h1>D-019 HTTPS browser checks</h1>
+<p>Test-only backend and PostgreSQL database. No tokens are read or displayed by this page.</p>
+<button id="run">Run session checks</button><p id="result" role="status">Not run</p><ol id="checks"></ol>
+<script>
+const button = document.querySelector('#run'), list = document.querySelector('#checks');
+const result = document.querySelector('#result');
+const headers = {'Content-Type':'application/json','X-OpsPilot-Request':'1'};
+async function send(path, body) {
+  const response = await fetch('/api/v1/' + path, {
+    method: body === undefined ? 'GET' : 'POST', credentials:'same-origin', cache:'no-store',
+    headers: body === undefined ? {} : headers,
+    body: body === undefined ? undefined : JSON.stringify(body)
+  });
+  return {status:response.status, data:await response.json(),
+          cookieHidden:response.headers.get('set-cookie') === null};
+}
+async function control(operation) { return send('_session-tests/control', {operation}); }
+function check(value, label) {
+  const item = document.createElement('li'); item.textContent = (value ? 'PASS: ' : 'FAIL: ') + label;
+  list.append(item); if (!value) throw new Error(label);
+}
+button.onclick = async () => {
+  button.disabled = true; list.replaceChildren(); result.textContent = 'Running…';
+  try {
+    await control('clear');
+    let response = await send('_session-tests/current');
+    check(response.status === 401 && response.data.error.code === 'SESSION_REQUIRED', 'Missing cookie is rejected');
+    response = await send('visitor-session', {visitor_context_id:'00000000-0000-4000-8000-000000000001'});
+    check(response.status === 422, 'Client-supplied identity is rejected');
+    const first = await send('visitor-session', {});
+    check(first.status === 201 && Object.keys(first.data).sort().join(',') === 'expires_at,visitor_context_id', 'Bootstrap returns only public reference and expiry');
+    check(first.cookieHidden && !document.cookie.includes('__Host-opspilot_visitor'), 'Cookie/Set-Cookie are inaccessible to frontend JavaScript');
+    response = await send('_session-tests/current');
+    check(response.status === 200 && response.data.visitor_context_id === first.data.visitor_context_id, 'Browser accepted the Secure host cookie and forwards it over HTTPS');
+    response = await send('visitor-session', {});
+    check(response.status === 200 && JSON.stringify(response.data) === JSON.stringify(first.data), 'Session reused with unchanged absolute expiry');
+    await control('invalid'); response = await send('_session-tests/current');
+    check(response.status === 401 && response.data.error.code === 'SESSION_INVALID', 'Unknown token is rejected');
+    response = await send('_session-tests/current');
+    check(response.data.error.code === 'SESSION_REQUIRED', 'Invalid cookie was cleared through the proxy');
+    const second = await send('visitor-session', {});
+    check(second.status === 201 && second.data.visitor_context_id !== first.data.visitor_context_id, 'Fresh visitor has an independent context');
+    response = await send('_session-tests/current?visitor_context_id=' + first.data.visitor_context_id);
+    check(response.data.visitor_context_id === second.data.visitor_context_id, 'Claiming the first public UUID does not impersonate that visitor');
+    await control('invalidate'); response = await send('_session-tests/current');
+    check(response.status === 401 && response.data.error.code === 'SESSION_INVALID', 'Invalidated cookie is rejected');
+    const third = await send('visitor-session', {});
+    await control('advance'); response = await send('_session-tests/current');
+    check(response.status === 401 && response.data.error.code === 'SESSION_EXPIRED', 'Server rejects absolute expiry even while browser still sends the cookie');
+    response = await send('_session-tests/current');
+    check(response.data.error.code === 'SESSION_REQUIRED', 'Expired cookie was cleared through the proxy');
+    const fourth = await send('visitor-session', {});
+    check(fourth.status === 201 && fourth.data.visitor_context_id !== third.data.visitor_context_id, 'Explicit retry after expiry creates a new owner');
+    result.textContent = 'All 14 browser checks passed';
+  } catch (error) { result.textContent = 'FAILED: ' + error.message; }
+  finally { button.disabled = false; }
+};
+</script></html>

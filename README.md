@@ -1,6 +1,19 @@
-# OpsPilot AI — Codex Project Starter
+# OpsPilot AI
 
-This starter kit transfers the project direction and the agreed learning workflow into a repository that Codex can use across separate chats.
+A learning-first payment-incident investigation assistant using synthetic evidence.
+The approved stack is Next.js/TypeScript, FastAPI/Pydantic, PostgreSQL, SQLAlchemy 2.x,
+and Alembic.
+
+## Run the application foundation
+
+Follow [local setup and verification](docs/FOUNDATION_SETUP.md) for dependencies,
+dedicated databases, explicit migrations, HTTPS, and development commands.
+
+The application has a connection-check page, `GET /api/v1/health`, and D-019
+[anonymous visitor sessions](docs/VISITOR_SESSIONS.md), using migration 001's four
+ownership/catalog tables. The full investigation journey, fixture loading, and AI
+features are not implemented yet.
+See [project status](docs/PROJECT_STATUS.md) and the [approved decisions](docs/DECISION_LOG.md).
 
 ## What is included
 
@@ -11,15 +24,11 @@ This starter kit transfers the project direction and the agreed learning workflo
 - `docs/PROJECT_STATUS.md` — the shared source of truth for current phase, decisions, blockers, and next steps.
 - `docs/DECISION_LOG.md` and `docs/decisions/ADR_TEMPLATE.md` — record technical decisions and trade-offs.
 - `docs/LEARNING_LOG.md` — daily learning journal.
-- `docs/prompts/` — copy-ready prompts for the different Codex chats.
+- `backend/`, `frontend/`, and `scripts/` — application foundation and local setup helpers.
 
-## Recommended first steps
+## Learning workflow
 
-1. Extract this folder somewhere convenient, for example `~/Developer/opspilot-ai`.
-2. Rename the folder to `opspilot-ai` if needed.
-3. Open the **folder itself** in the Codex app and make it the working project.
-4. Start a first chat named `00 - Project Guide & Learning Lead` and paste the prompt from `docs/prompts/00-project-guide.md`.
-5. Ask Codex to read `AGENTS.md` and all files under `docs/`, summarize the project, and confirm that it understands the learning-first rules. Do not ask it to write application code yet.
-6. Initialize Git when you are ready, then commit this starter documentation as the first commit.
-
-The folder is deliberately documentation-only. Do not scaffold the app until product discovery and the initial requirements/design decisions are complete.
+Read `AGENTS.md` and the current project documents before starting a bounded task.
+The owner writes most implementation code, supported by explanations, hints, review,
+and debugging. Follow the approved first-slice contracts rather than implementing
+the entire target data model or provisional capabilities from the original brief.
