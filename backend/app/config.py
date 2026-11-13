@@ -14,6 +14,7 @@ class Settings(BaseModel):
     database_url: SecretStr
     public_origin: str = "https://localhost:3000"
     visitor_session_ttl_seconds: int = Field(default=86400, gt=0)
+    current_dataset_version: str = "synthetic-payments-v0.1"
 
     @field_validator("database_url")
     @classmethod
@@ -52,6 +53,9 @@ class Settings(BaseModel):
                 database_url=os.environ.get("DATABASE_URL", ""),
                 public_origin=os.environ.get("PUBLIC_ORIGIN", "https://localhost:3000"),
                 visitor_session_ttl_seconds=os.environ.get("VISITOR_SESSION_TTL_SECONDS", "86400"),
+                current_dataset_version=os.environ.get(
+                    "CURRENT_DATASET_VERSION", "synthetic-payments-v0.1"
+                ),
             )
         except (ValidationError, ValueError):
             # Never include environment input or connection strings in startup errors.

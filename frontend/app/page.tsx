@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import VisitorSessionPanel from "./visitor-session-panel";
+import InvestigationPanel from "./investigation-panel";
 
 type Connection =
   | { status: "checking" }
@@ -11,6 +12,7 @@ type Connection =
 export default function Home() {
   const [connection, setConnection] = useState<Connection>({ status: "checking" });
   const [attempt, setAttempt] = useState(0);
+  const [visitorEpoch, setVisitorEpoch] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -77,7 +79,13 @@ export default function Home() {
           Check again
         </button>
       </section>
-      <VisitorSessionPanel />
+      <VisitorSessionPanel onNewSession={() => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("investigation");
+        window.history.replaceState(null, "", url);
+        setVisitorEpoch(value => value + 1);
+      }} />
+      <InvestigationPanel key={visitorEpoch} />
     </main>
   );
 }

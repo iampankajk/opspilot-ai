@@ -13,3 +13,9 @@ section { margin-top: 32px; padding: 28px; background: white; border: 1px solid 
 button { border: 0; border-radius: 6px; padding: 12px 18px; background: #19486b; color: white; font: inherit; cursor: pointer; }
 button:disabled { opacity: 0.6; cursor: wait; }
 button:focus-visible { outline: 3px solid #b66b00; outline-offset: 4px; }
+form { display: grid; gap: 12px; }
+input { font: inherit; padding: 12px; border: 1px solid #8698a8; border-radius: 6px; width: 100%; }
+input:focus-visible { outline: 3px solid #b66b00; outline-offset: 3px; }
+.incident-context { margin: 24px 0; padding: 16px; border-left: 3px solid #19486b; background: #f4f7fa; }
+.thread-nav { display: flex; flex-wrap: wrap; gap: 12px; margin: 20px 0; }
+.thread-nav button[aria-pressed="false"] { background: #e7edf3; color: #19486b; }

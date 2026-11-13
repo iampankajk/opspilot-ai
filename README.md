@@ -9,10 +9,11 @@ and Alembic.
 Follow [local setup and verification](docs/FOUNDATION_SETUP.md) for dependencies,
 dedicated databases, explicit migrations, HTTPS, and development commands.
 
-The application has a connection-check page, `GET /api/v1/health`, and D-019
-[anonymous visitor sessions](docs/VISITOR_SESSIONS.md), using migration 001's four
-ownership/catalog tables. The full investigation journey, fixture loading, and AI
-features are not implemented yet.
+The application has readiness checks, D-019 [anonymous visitor sessions](docs/VISITOR_SESSIONS.md),
+and [visitor-owned investigation workspaces](docs/INVESTIGATION_WORKSPACES.md), using migrations
+001–002. It validates the configured synthetic fixture and supports incident entry,
+create/resume, two threads, and durable workspace reload. Case/evidence persistence,
+investigation reviews, and AI features remain deferred.
 See [project status](docs/PROJECT_STATUS.md) and the [approved decisions](docs/DECISION_LOG.md).
 
 ## What is included
