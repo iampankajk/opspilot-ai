@@ -325,3 +325,151 @@ class EvidenceRelationship(Base):
     basis_record_id: Mapped[str | None] = mapped_column(Text)
     attribution: Mapped[str] = mapped_column(Text)
     limitations: Mapped[list] = mapped_column(JSONB)
+
+
+class EvidenceRequest(Base):
+    __tablename__ = "evidence_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "thread_kind"],
+            ["thread_states.state_id", "thread_states.thread_kind"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "thread_kind", "case_id"],
+            ["case_threads.state_id", "case_threads.thread_kind", "case_threads.case_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "retry_of_request_id"],
+            ["evidence_requests.state_id", "evidence_requests.request_id"],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "status IN ('pending','completed','partial','failed','interrupted','stale')",
+            name="status",
+        ),
+        CheckConstraint("deadline_at > requested_at", name="deadline"),
+        CheckConstraint("expected_draft_version >= 0", name="version"),
+        CheckConstraint(
+            "(status = 'pending' AND finished_at IS NULL) OR "
+            "(status <> 'pending' AND finished_at IS NOT NULL AND finished_at >= requested_at)",
+            name="finished",
+        ),
+        CheckConstraint("retry_of_request_id <> request_id", name="not_self_retry"),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    request_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    thread_kind: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str | None] = mapped_column(Text)
+    initiator: Mapped[str] = mapped_column(Text)
+    query_kind: Mapped[str] = mapped_column(Text)
+    criteria: Mapped[dict] = mapped_column(JSONB)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text)
+    expected_draft_version: Mapped[int] = mapped_column(Integer)
+    failure_code: Mapped[str | None] = mapped_column(Text)
+    retry_of_request_id: Mapped[UUID | None] = mapped_column()
+
+
+class RequestSource(Base):
+    __tablename__ = "request_sources"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "request_id"],
+            ["evidence_requests.state_id", "evidence_requests.request_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "source_key"],
+            ["state_sources.state_id", "state_sources.source_key"],
+            ondelete="RESTRICT",
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    request_id: Mapped[UUID] = mapped_column(primary_key=True)
+    source_key: Mapped[str] = mapped_column(Text, primary_key=True)
+
+
+class RetrievalResult(Base):
+    __tablename__ = "retrieval_results"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "request_id", "source_key"],
+            [
+                "request_sources.state_id",
+                "request_sources.request_id",
+                "request_sources.source_key",
+            ],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "execution_status IN ('pending','completed','failed','interrupted')", name="execution"
+        ),
+        CheckConstraint(
+            "availability IN ('included','not_included','not_constructed','unavailable')",
+            name="availability",
+        ),
+        CheckConstraint("match_status IN ('matches','no_matches','not_evaluated')", name="match"),
+        CheckConstraint(
+            "completeness IN ('unverified','known_partial',"
+            "'verified_for_stated_scope','not_applicable')",
+            name="completeness",
+        ),
+        CheckConstraint(
+            "(execution_status = 'completed' AND match_status = 'matches' "
+            "AND returned_count IS NOT NULL AND returned_count > 0) OR "
+            "(execution_status = 'completed' AND match_status = 'no_matches' "
+            "AND returned_count IS NOT NULL AND returned_count = 0) OR "
+            "(match_status = 'not_evaluated' AND returned_count IS NULL)",
+            name="count",
+        ),
+        CheckConstraint(
+            "(execution_status = 'pending' AND completed_at IS NULL) OR "
+            "(execution_status <> 'pending' AND completed_at IS NOT NULL)",
+            name="finished",
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    request_id: Mapped[UUID] = mapped_column(primary_key=True)
+    source_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    execution_status: Mapped[str] = mapped_column(Text)
+    availability: Mapped[str] = mapped_column(Text)
+    match_status: Mapped[str] = mapped_column(Text)
+    returned_count: Mapped[int | None] = mapped_column(Integer)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    scope: Mapped[str | None] = mapped_column(Text)
+    completeness: Mapped[str] = mapped_column(Text)
+    limitations: Mapped[list] = mapped_column(JSONB)
+    error_code: Mapped[str | None] = mapped_column(Text)
+
+
+class RetrievalResultRecord(Base):
+    __tablename__ = "retrieval_result_records"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "request_id", "source_key"],
+            [
+                "retrieval_results.state_id",
+                "retrieval_results.request_id",
+                "retrieval_results.source_key",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "evidence_record_id", "source_key"],
+            [
+                "evidence_records.state_id",
+                "evidence_records.evidence_record_id",
+                "evidence_records.source_key",
+            ],
+            ondelete="RESTRICT",
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    request_id: Mapped[UUID] = mapped_column(primary_key=True)
+    source_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    evidence_record_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    match_basis: Mapped[dict] = mapped_column(JSONB)

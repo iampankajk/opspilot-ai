@@ -77,7 +77,7 @@ An adapter here means a small internal boundary for the model request/response, 
 4. Before attaching generated proposals/results, recheck visitor ownership, state/draft version, and operation identity. The operation tracks version changes from its own commits; unrelated changes can make its output stale. Reject stale attachment rather than moving results to whichever thread/draft is currently open or editing a revision.
 5. On timeout/failure, keep available request history and show a retryable outcome. If the process dies before writing completion, the next draft read/retry reconciles overdue unfinished work as interrupted; no durable job automatically resumes it. Frozen history remains an as-of snapshot, including any request that was pending when saved, not a live promise of running work.
 
-An operation-history/deadline field refinement is needed before implementation; the existing request/result model is the starting point, not a claim that restart handling already exists. Retrying a failed evidence/AI request creates a linked request; Save/refresh publication retries retain their idempotent operation key and do not create duplicate revisions.
+First-slice request history/deadlines are finalized in §4.3 and implemented in Task 4B; later AI operation details remain deferred. See [actual verification and limits](EVIDENCE_RETRIEVAL.md). Retrying a failed evidence/AI request creates a linked request; Save/refresh publication retries retain their idempotent operation key and do not create duplicate revisions.
 
 ### 1.5 D-018 ownership relationships and next review
 
@@ -344,7 +344,14 @@ first owned workspace/resume/case access, under an investigation-row lock, using
 pinned dataset. This retains the owner, investigation, state, draft, and coverage rows. The
 one committed backfill advances `draft_version` once; retries do not. New initialization
 still begins at version 0. Case counts now come from persisted thread memberships. Schema
-upgrade itself imports no evidence, and stage 004 remains deferred. See [verification](CASE_PERSISTENCE.md).
+upgrade itself imports no evidence. See [Task 4A verification](CASE_PERSISTENCE.md).
+
+Task 4B adds stage 004 and the approved bounded case evidence-request POST. Request start and
+finalization commit separately; source-specific outcomes, returned-record memberships, retries,
+and overdue interruption recovery are persisted under ownership/current-state/version checks.
+The schema now contains all 17 first-slice domain tables. The inspection UI and automated/API
+verification are complete; visual browser verification remains pending because computer-use
+permissions were unavailable. See [Task 4B verification and limits](EVIDENCE_RETRIEVAL.md).
 
 ### 4.6 First-slice acceptance checklist
 

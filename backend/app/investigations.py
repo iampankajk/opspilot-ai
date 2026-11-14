@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.api_errors import APIError
 from app.catalog import SourceCoverage
+from app.evidence import reconcile_overdue
 from app.materialization import materialize_state
 from app.models import (
     CaseThread,
@@ -156,6 +157,7 @@ def checked_view(
     db: Session, request: Request, investigation: Investigation, clock: Clock
 ) -> Workspace:
     materialize_state(db, investigation.investigation_id)
+    reconcile_overdue(db, db.get(WorkingDraft, investigation.investigation_id), clock)
     result = workspace_view(db, investigation)
     actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
     if actor.visitor_context_id != investigation.visitor_context_id:
@@ -297,6 +299,7 @@ def thread_cases(
         if db.get(ThreadState, (draft.state_id, thread_kind)) is None:
             raise not_found()
         materialize_state(db, investigation_id)
+        reconcile_overdue(db, draft, clock)
         # The same state participates in every join; local IDs alone never select data.
         cases = db.scalars(
             select(PaymentCase)

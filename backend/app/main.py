@@ -14,6 +14,7 @@ from app.api_errors import APIError
 from app.catalog import initialize_catalog
 from app.config import Settings
 from app.database import build_engine, check_database, expected_schema_revision
+from app.evidence import router as evidence_router
 from app.investigations import router as investigation_router
 from app.visitor_sessions import clear_session_cookie
 from app.visitor_sessions import router as visitor_router
@@ -27,7 +28,9 @@ class HealthResponse(BaseModel):
     schema_status: Literal["current"] = Field(default="current", alias="schema")
 
 
-def error_response(request: Request, status: int, code: str, message: str) -> JSONResponse:
+def error_response(
+    request: Request, status: int, code: str, message: str, details: dict | None = None
+) -> JSONResponse:
     return JSONResponse(
         status_code=status,
         content={
@@ -36,7 +39,7 @@ def error_response(request: Request, status: int, code: str, message: str) -> JS
                 "message": message,
                 "request_id": request.state.request_id,
                 "retryable": status == 503,
-                "details": {},
+                "details": details or {},
             }
         },
     )
@@ -68,6 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="OpsPilot AI API", version="0.1.0", lifespan=lifespan)
     app.include_router(visitor_router)
     app.include_router(investigation_router)
+    app.include_router(evidence_router)
 
     @app.middleware("http")
     async def api_boundary(request: Request, call_next):
@@ -127,7 +131,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(APIError)
     async def application_error(request: Request, exc: APIError):
-        response = error_response(request, exc.status, exc.code, exc.message)
+        response = error_response(request, exc.status, exc.code, exc.message, exc.details)
         if exc.clear_cookie:
             clear_session_cookie(response)
         return response

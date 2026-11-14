@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { loadCases, type CaseList, type ThreadKind, type Workspace } from "../lib/investigations";
 
+import EvidencePanel from "./evidence-panel";
+
 type Result = { status: "loading" } | { status: "failed"; message: string } | { status: "ready"; data: CaseList };
 
 export default function ThreadCases({ workspace, thread, onVersion }: {
@@ -49,7 +51,8 @@ export default function ThreadCases({ workspace, thread, onVersion }: {
         </>}
         <p className="request-id">Primary report: <code>{c.primary_report_record_id}</code></p>
         <p>Investigation: not started. Reported issues do not establish payment outcomes.</p>
+        <EvidencePanel workspace={workspace} thread={thread} selectedCase={c} onVersion={onVersion} />
       </article>))}
-    <p>Provider completeness is unverified. Bank/settlement evidence is not constructed. Evidence inspection is deferred.</p>
+
   </div>;
 }
