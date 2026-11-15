@@ -9,6 +9,7 @@ class APIError(Exception):
         *,
         clear_cookie: bool = False,
         details: dict | None = None,
+        retryable: bool | None = None,
     ):
         super().__init__(message)
         self.status = status
@@ -17,3 +18,4 @@ class APIError(Exception):
         self.clear_cookie = clear_cookie
 
         self.details = details or {}
+        self.retryable = status == 503 if retryable is None else retryable

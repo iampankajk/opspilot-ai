@@ -1,11 +1,26 @@
 import os
+from decimal import Decimal
+from math import isfinite
 from pathlib import Path
+from typing import Literal
 from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
+
+FINDINGS_PUBLICATION_RESERVE_SECONDS = 6
+FINDINGS_DEADLINE_CONFIGURATION_ERROR = (
+    "Invalid backend configuration: AI_FINDINGS_DEADLINE_SECONDS must be finite and greater "
+    f"than the {FINDINGS_PUBLICATION_RESERVE_SECONDS}-second publication reserve."
+)
+
+
+def validate_findings_deadline(value: float) -> float:
+    if not isfinite(value) or value <= FINDINGS_PUBLICATION_RESERVE_SECONDS:
+        raise ValueError(FINDINGS_DEADLINE_CONFIGURATION_ERROR)
+    return value
 
 
 class Settings(BaseModel):
@@ -15,6 +30,21 @@ class Settings(BaseModel):
     public_origin: str = "https://localhost:3000"
     visitor_session_ttl_seconds: int = Field(default=86400, gt=0)
     current_dataset_version: str = "synthetic-payments-v0.1"
+    ai_findings_enabled: bool = False
+    ai_findings_provider: Literal["mock", "openai"] = "mock"
+    ai_findings_model: str = "gpt-6-luna"
+    ai_findings_max_input_tokens: int = Field(default=12000, gt=0)
+    ai_findings_max_output_tokens: int = Field(default=3000, gt=0)
+    ai_findings_model_timeout_seconds: float = Field(default=10, gt=0, allow_inf_nan=False)
+    ai_findings_count_timeout_seconds: float = Field(default=3, gt=0, allow_inf_nan=False)
+    ai_findings_deadline_seconds: float = Field(default=20, gt=0, allow_inf_nan=False)
+    ai_findings_max_attempt_usd: Decimal = Field(default=Decimal("0.003"), gt=0)
+    ai_findings_max_attempts_per_case: int = Field(default=5, gt=0, le=50)
+
+    @field_validator("ai_findings_deadline_seconds")
+    @classmethod
+    def require_publication_reserve(cls, value: float) -> float:
+        return validate_findings_deadline(value)
 
     @field_validator("database_url")
     @classmethod
@@ -56,9 +86,19 @@ class Settings(BaseModel):
                 current_dataset_version=os.environ.get(
                     "CURRENT_DATASET_VERSION", "synthetic-payments-v0.1"
                 ),
+                **{
+                    name: os.environ[name.upper()]
+                    for name in cls.model_fields
+                    if name.startswith("ai_findings_") and name.upper() in os.environ
+                },
             )
-        except (ValidationError, ValueError):
+        except (ValidationError, ValueError) as exc:
             # Never include environment input or connection strings in startup errors.
+            if isinstance(exc, ValidationError) and any(
+                error["loc"] == ("ai_findings_deadline_seconds",)
+                for error in exc.errors(include_input=False)
+            ):
+                raise RuntimeError(FINDINGS_DEADLINE_CONFIGURATION_ERROR) from None
             raise RuntimeError(
                 "Invalid backend configuration; check DATABASE_URL, PUBLIC_ORIGIN, and session TTL"
             ) from None

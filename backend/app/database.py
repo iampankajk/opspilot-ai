@@ -51,6 +51,12 @@ def check_database(engine: Engine, expected_revision: str) -> str | None:
                 "request_sources",
                 "retrieval_results",
                 "retrieval_result_records",
+                "ai_generation_requests",
+                "findings",
+                "finding_cases",
+                "ai_proposals",
+                "evidence_citations",
+                "assessment_result_refs",
             }
             if not required <= tables:
                 return "SCHEMA_NOT_READY"

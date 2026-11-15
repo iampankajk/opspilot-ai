@@ -8,6 +8,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
+    Index,
     Integer,
     LargeBinary,
     MetaData,
@@ -16,6 +17,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -473,3 +475,261 @@ class RetrievalResultRecord(Base):
     source_key: Mapped[str] = mapped_column(Text, primary_key=True)
     evidence_record_id: Mapped[str] = mapped_column(Text, primary_key=True)
     match_basis: Mapped[dict] = mapped_column(JSONB)
+
+
+class AIGenerationRequest(Base):
+    __tablename__ = "ai_generation_requests"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "thread_kind", "case_id"],
+            ["case_threads.state_id", "case_threads.thread_kind", "case_threads.case_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "evidence_request_id"],
+            ["evidence_requests.state_id", "evidence_requests.request_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "retry_of_generation_id"],
+            ["ai_generation_requests.state_id", "ai_generation_requests.generation_id"],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("state_id", "generation_id", "thread_kind", name="uq_generation_thread"),
+        UniqueConstraint(
+            "state_id", "generation_id", "evidence_request_id", name="uq_generation_request"
+        ),
+        CheckConstraint(
+            "status IN ('pending','completed','failed','interrupted','stale')", name="status"
+        ),
+        CheckConstraint("deadline_at > requested_at", name="deadline"),
+        CheckConstraint(
+            "expected_draft_version >= 0 AND post_start_version = expected_draft_version + 1",
+            name="versions",
+        ),
+        CheckConstraint("retry_of_generation_id <> generation_id", name="not_self_retry"),
+        CheckConstraint(
+            "(status = 'pending' AND finished_at IS NULL) OR (status <> 'pending' AND "
+            "finished_at IS NOT NULL AND finished_at >= requested_at)",
+            name="finished",
+        ),
+        CheckConstraint(
+            "(status = 'completed' AND normalized_output IS NOT NULL) OR "
+            "(status <> 'completed' AND normalized_output IS NULL)",
+            name="output",
+        ),
+        CheckConstraint("reserved_cost_usd IS NULL OR reserved_cost_usd >= 0", name="reserve"),
+        CheckConstraint("actual_cost_usd IS NULL OR actual_cost_usd >= 0", name="cost"),
+        Index(
+            "uq_ai_generation_completed_scope",
+            "state_id",
+            "thread_kind",
+            "case_id",
+            unique=True,
+            postgresql_where=text("status = 'completed'"),
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    generation_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    thread_kind: Mapped[str] = mapped_column(Text)
+    case_id: Mapped[str] = mapped_column(Text)
+    evidence_request_id: Mapped[UUID] = mapped_column()
+    retry_of_generation_id: Mapped[UUID | None] = mapped_column()
+    status: Mapped[str] = mapped_column(Text)
+    failure_code: Mapped[str | None] = mapped_column(Text)
+    retryable: Mapped[bool] = mapped_column(Boolean, default=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    deadline_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expected_draft_version: Mapped[int] = mapped_column(Integer)
+    post_start_version: Mapped[int] = mapped_column(Integer)
+    provider: Mapped[str] = mapped_column(Text)
+    configured_model: Mapped[str] = mapped_column(Text)
+    returned_model: Mapped[str | None] = mapped_column(Text)
+    provider_response_id: Mapped[str | None] = mapped_column(Text)
+    prompt_version: Mapped[str] = mapped_column(Text)
+    schema_version: Mapped[str] = mapped_column(Text)
+    input_bundle: Mapped[dict] = mapped_column(JSONB)
+    input_digest: Mapped[str] = mapped_column(String(64))
+    budget: Mapped[dict] = mapped_column(JSONB)
+    counted_input_tokens: Mapped[int | None] = mapped_column(Integer)
+    reserved_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric())
+    actual_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric())
+    usage: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
+    normalized_output: Mapped[dict | None] = mapped_column(JSONB(none_as_null=True))
+
+
+class Finding(Base):
+    __tablename__ = "findings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "thread_kind"],
+            ["thread_states.state_id", "thread_states.thread_kind"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "generation_id", "thread_kind"],
+            [
+                "ai_generation_requests.state_id",
+                "ai_generation_requests.generation_id",
+                "ai_generation_requests.thread_kind",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "finding_id", "current_proposal_id"],
+            ["ai_proposals.state_id", "ai_proposals.finding_id", "ai_proposals.proposal_id"],
+            name="fk_findings_current_proposal",
+            use_alter=True,
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("state_id", "finding_id", "thread_kind", name="uq_finding_thread"),
+        UniqueConstraint("state_id", "finding_id", "generation_id", name="uq_finding_generation"),
+        UniqueConstraint(
+            "state_id", "thread_kind", "logical_finding_ref", name="uq_finding_logical"
+        ),
+        CheckConstraint("kind IN ('observation','hypothesis')", name="kind"),
+        CheckConstraint("btrim(claim) <> '' AND length(claim) <= 240", name="claim"),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    finding_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    generation_id: Mapped[UUID] = mapped_column()
+    thread_kind: Mapped[str] = mapped_column(Text)
+    logical_finding_ref: Mapped[str] = mapped_column(Text)
+    claim: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    current_proposal_id: Mapped[UUID | None] = mapped_column()
+
+
+class FindingCase(Base):
+    __tablename__ = "finding_cases"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "finding_id", "thread_kind"],
+            ["findings.state_id", "findings.finding_id", "findings.thread_kind"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "thread_kind", "case_id"],
+            ["case_threads.state_id", "case_threads.thread_kind", "case_threads.case_id"],
+            ondelete="RESTRICT",
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    finding_id: Mapped[UUID] = mapped_column(primary_key=True)
+    case_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    thread_kind: Mapped[str] = mapped_column(Text)
+
+
+class AIProposal(Base):
+    __tablename__ = "ai_proposals"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "finding_id", "generation_id"],
+            ["findings.state_id", "findings.finding_id", "findings.generation_id"],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "generation_id", "evidence_request_id"],
+            [
+                "ai_generation_requests.state_id",
+                "ai_generation_requests.generation_id",
+                "ai_generation_requests.evidence_request_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("state_id", "finding_id", "proposal_id", name="uq_proposal_finding"),
+        UniqueConstraint(
+            "state_id", "proposal_id", "evidence_request_id", name="uq_proposal_request"
+        ),
+        CheckConstraint(
+            "proposed_status IN ('confirmed','not_confirmed','inconclusive')", name="status"
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    proposal_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    finding_id: Mapped[UUID] = mapped_column()
+    generation_id: Mapped[UUID] = mapped_column()
+    evidence_request_id: Mapped[UUID] = mapped_column()
+    proposed_status: Mapped[str] = mapped_column(Text)
+    rationale: Mapped[list] = mapped_column(JSONB)
+    limitations: Mapped[list] = mapped_column(JSONB)
+    next_questions: Mapped[list] = mapped_column(JSONB)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class EvidenceCitation(Base):
+    __tablename__ = "evidence_citations"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "proposal_id", "request_id"],
+            [
+                "ai_proposals.state_id",
+                "ai_proposals.proposal_id",
+                "ai_proposals.evidence_request_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "request_id", "source_key", "evidence_record_id"],
+            [
+                "retrieval_result_records.state_id",
+                "retrieval_result_records.request_id",
+                "retrieval_result_records.source_key",
+                "retrieval_result_records.evidence_record_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint("state_id", "proposal_id", "ordinal"),
+        CheckConstraint("ordinal >= 0 AND ordinal < 8", name="ordinal"),
+        CheckConstraint("role IN ('supports','contradicts','context')", name="role"),
+        CheckConstraint("length(pointer) BETWEEN 1 AND 256", name="pointer"),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    citation_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    proposal_id: Mapped[UUID] = mapped_column()
+    request_id: Mapped[UUID] = mapped_column()
+    source_key: Mapped[str] = mapped_column(Text)
+    evidence_record_id: Mapped[str] = mapped_column(Text)
+    pointer: Mapped[str] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(Text)
+    explanation: Mapped[str] = mapped_column(Text)
+    ordinal: Mapped[int] = mapped_column(Integer)
+
+
+class AssessmentResultRef(Base):
+    __tablename__ = "assessment_result_refs"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["state_id", "proposal_id", "request_id"],
+            [
+                "ai_proposals.state_id",
+                "ai_proposals.proposal_id",
+                "ai_proposals.evidence_request_id",
+            ],
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["state_id", "request_id", "source_key"],
+            [
+                "retrieval_results.state_id",
+                "retrieval_results.request_id",
+                "retrieval_results.source_key",
+            ],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("statement_kind IN ('rationale','limitations')", name="statement_kind"),
+        CheckConstraint("statement_index >= 0", name="statement_index"),
+        UniqueConstraint(
+            "state_id", "proposal_id", "statement_kind", "statement_index", "source_key"
+        ),
+    )
+    state_id: Mapped[UUID] = mapped_column(primary_key=True)
+    result_ref_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    proposal_id: Mapped[UUID] = mapped_column()
+    request_id: Mapped[UUID] = mapped_column()
+    source_key: Mapped[str] = mapped_column(Text)
+    statement_kind: Mapped[str] = mapped_column(Text)
+    statement_index: Mapped[int] = mapped_column(Integer)
+    explanation: Mapped[str] = mapped_column(Text)

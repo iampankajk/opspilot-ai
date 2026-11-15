@@ -33,7 +33,7 @@ def visitor(**overrides):
     return VisitorContext(**(values | overrides))
 
 
-def test_upgrade_creates_only_four_boundaries_and_matches_metadata(database):
+def test_upgrade_creates_five_boundaries_and_matches_metadata(database):
     engine, _ = database
     assert set(inspect(engine).get_table_names(schema="public")) == {
         "alembic_version",
@@ -54,6 +54,12 @@ def test_upgrade_creates_only_four_boundaries_and_matches_metadata(database):
         "request_sources",
         "retrieval_results",
         "retrieval_result_records",
+        "ai_generation_requests",
+        "findings",
+        "finding_cases",
+        "ai_proposals",
+        "evidence_citations",
+        "assessment_result_refs",
     }
     assert check_database(engine, expected_schema_revision()) is None
     assert check_database(engine, "a_different_revision") == "SCHEMA_NOT_READY"
@@ -156,7 +162,7 @@ def test_all_migrations_upgrade_an_empty_schema_without_touching_public(database
             connection.exec_driver_sql(ddl)
             assert (
                 connection.scalar(text("SELECT version_num FROM alembic_version"))
-                == "0004_evidence_history"
+                == "0005_ai_findings"
             )
             from app.models import Base
 
