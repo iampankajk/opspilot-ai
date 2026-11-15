@@ -5,7 +5,8 @@ Task 1 implements only migration boundary 001 from System Architecture §4.5. Ta
 [anonymous visitor sessions](VISITOR_SESSIONS.md) on that schema. Task 3 adds migration 002,
 the validated fixture catalog, and [owned workspace initialization/retrieval](INVESTIGATION_WORKSPACES.md).
 Task 4A adds migration 003 and [case/evidence persistence with thread-scoped listing](CASE_PERSISTENCE.md).
-Evidence-request execution/history and the remaining investigation journey are deferred.
+Task 4B adds migration 004 and [bounded evidence inspection/request history](EVIDENCE_RETRIEVAL.md).
+AI, findings/reviews, numbered revisions, refresh, and export remain deferred.
 
 ## Prerequisites and structure
 
@@ -67,11 +68,12 @@ Apply the schema deliberately, from `backend/`:
 .venv/bin/alembic check
 ```
 
-Current expected head: `0003_case_evidence`. Stage 001 creates `visitor_contexts`,
+Current expected head: `0004_evidence_history`. Stage 001 creates `visitor_contexts`,
 `dataset_versions`, `incidents`, and `investigations`; stage 002 adds `investigation_states`,
 `working_drafts`, `thread_states`, and `state_sources`; stage 003 adds `evidence_records`,
-`payment_cases`, `case_threads`, `case_evidence_links`, and `evidence_relationships`. There are
-13 domain tables plus Alembic's bookkeeping. Schema
+`payment_cases`, `case_threads`, `case_evidence_links`, and `evidence_relationships`; stage 004 adds
+`evidence_requests`, `request_sources`, `retrieval_results`, and `retrieval_result_records`. There are
+17 domain tables plus Alembic's bookkeeping. Schema
 migrations import no fixture payloads. Startup validates the explicitly configured
 `CURRENT_DATASET_VERSION` (default approved label `synthetic-payments-v0.1`) and registers its
 immutable catalog identities idempotently. A missing/mismatched fixture fails visibly.

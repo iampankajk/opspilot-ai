@@ -13,6 +13,10 @@ export type Workspace = IncidentEntry & {
 };
 
 const messages: Record<string, string> = {
+  STALE_DRAFT_VERSION: "The draft changed. Reload the saved workspace before retrying.",
+  OPERATION_IN_PROGRESS: "An evidence request is still running. Reload the workspace before retrying.",
+  INVALID_RETRY_REFERENCE: "This request cannot be retried in the selected case. Reload the workspace.",
+  EVIDENCE_RETRIEVAL_FAILED: "Evidence retrieval failed. Reload the workspace, then retry explicitly.",
   STALE_STATE: "The selected state is stale. Reload the saved workspace below before trying again.",
   SESSION_REQUIRED: "Start or resume a demo session above, then try again.",
   SESSION_INVALID: "Your session is invalid. Explicitly start a fresh demo above to continue.",
@@ -26,10 +30,12 @@ const messages: Record<string, string> = {
 export class InvestigationAPIError extends Error {
   status: number;
   code: string;
-  constructor(status: number, code: string) {
+  details: { state_id?: string; draft_version?: number; evidence_request_id?: string };
+  constructor(status: number, code: string, details: InvestigationAPIError["details"] = {}) {
     super(messages[code] ?? `The request failed (HTTP ${status}).`);
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -62,20 +68,29 @@ export function parseWorkspace(value: unknown): Workspace {
   return value as Workspace;
 }
 
-async function request(path: string, signal?: AbortSignal, body?: { incident_id: string }): Promise<unknown> {
+export async function request(path: string, signal?: AbortSignal, body?: object, timeout = 10_000): Promise<unknown> {
   const response = await fetch(`/api/v1/${path}`, {
     method: body ? "POST" : "GET", credentials: "same-origin", cache: "no-store",
     headers: body ? { "Content-Type": "application/json", "X-OpsPilot-Request": "1" } : {},
     body: body ? JSON.stringify(body) : undefined,
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
   });
   if (!response.ok) {
     let code = "HTTP_ERROR";
+    let details: InvestigationAPIError["details"] = {};
     try {
       const error: unknown = await response.json();
-      if (object(error) && object(error.error) && typeof error.error.code === "string") code = error.error.code;
+      if (object(error) && object(error.error) && typeof error.error.code === "string") {
+        code = error.error.code;
+        if (object(error.error.details)) {
+          const d = error.error.details;
+          details = { state_id: typeof d.state_id === "string" ? d.state_id : undefined,
+            draft_version: Number.isInteger(d.draft_version) ? d.draft_version as number : undefined,
+            evidence_request_id: typeof d.evidence_request_id === "string" ? d.evidence_request_id : undefined };
+        }
+      }
     } catch { /* A proxy outage may not return API JSON. */ }
-    throw new InvestigationAPIError(response.status, code);
+    throw new InvestigationAPIError(response.status, code, details);
   }
   return response.json();
 }

@@ -61,6 +61,7 @@ def context(database, monkeypatch):
 
         monkeypatch.setattr("app.visitor_sessions.Session", scoped_session)
         monkeypatch.setattr("app.investigations.Session", scoped_session)
+        monkeypatch.setattr("app.evidence.Session", scoped_session)
         app = create_app(settings)
         clock = Clock()
         app.dependency_overrides[get_clock] = lambda: clock
