@@ -12,9 +12,11 @@ from starlette.responses import JSONResponse
 
 from app.api_errors import APIError
 from app.catalog import initialize_catalog
-from app.config import Settings
+from app.config import Settings, validate_findings_deadline
 from app.database import build_engine, check_database, expected_schema_revision
 from app.evidence import router as evidence_router
+from app.findings import router as findings_router
+from app.findings_provider import MockFindingsProvider
 from app.investigations import router as investigation_router
 from app.visitor_sessions import clear_session_cookie
 from app.visitor_sessions import router as visitor_router
@@ -29,7 +31,12 @@ class HealthResponse(BaseModel):
 
 
 def error_response(
-    request: Request, status: int, code: str, message: str, details: dict | None = None
+    request: Request,
+    status: int,
+    code: str,
+    message: str,
+    details: dict | None = None,
+    retryable: bool | None = None,
 ) -> JSONResponse:
     return JSONResponse(
         status_code=status,
@@ -38,7 +45,7 @@ def error_response(
                 "code": code,
                 "message": message,
                 "request_id": request.state.request_id,
-                "retryable": status == 503,
+                "retryable": status == 503 if retryable is None else retryable,
                 "details": details or {},
             }
         },
@@ -49,8 +56,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = settings or Settings.from_env()
+        # Recheck explicitly supplied settings too: model_copy(update=...) skips validation.
+        try:
+            validate_findings_deadline(app.state.settings.ai_findings_deadline_seconds)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from None
         app.state.engine = build_engine(app.state.settings)
         app.state.schema_revision = expected_schema_revision()
+        app.state.findings_provider = (
+            MockFindingsProvider()
+            if app.state.settings.ai_findings_enabled
+            and app.state.settings.ai_findings_provider == "mock"
+            else None
+        )
         app.state.catalog = None
         app.state.catalog_error = None
         try:
@@ -72,6 +90,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(visitor_router)
     app.include_router(investigation_router)
     app.include_router(evidence_router)
+    app.include_router(findings_router)
 
     @app.middleware("http")
     async def api_boundary(request: Request, call_next):
@@ -131,7 +150,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(APIError)
     async def application_error(request: Request, exc: APIError):
-        response = error_response(request, exc.status, exc.code, exc.message, exc.details)
+        response = error_response(
+            request, exc.status, exc.code, exc.message, exc.details, exc.retryable
+        )
         if exc.clear_cookie:
             clear_session_cookie(response)
         return response

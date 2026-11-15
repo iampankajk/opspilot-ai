@@ -23,6 +23,7 @@ from app.evidence_schemas import (
     RetrievalCriteria,
     SourceOutcome,
 )
+from app.generation_history import pending_generation, reconcile_generations
 from app.models import (
     CaseEvidenceLink,
     CaseThread,
@@ -60,7 +61,7 @@ def conflict(code, draft):
     return APIError(
         409,
         code,
-        "Reload the workspace before retrying evidence inspection.",
+        "Reload the workspace before retrying this operation.",
         details={"state_id": str(draft.state_id), "draft_version": draft.draft_version},
     )
 
@@ -122,9 +123,10 @@ def reconcile_overdue(db, draft, clock):
     ).all()
     for operation in overdue:
         interrupt(db, operation, clock)
-    if overdue:
+    recovered_generations = reconcile_generations(db, draft, clock)
+    if overdue or recovered_generations:
         advance(draft, clock)
-    return bool(overdue)
+    return bool(overdue) or recovered_generations
 
 
 def reconcile_owned(request, investigation_id, state_id, thread, case, clock):
@@ -143,7 +145,7 @@ def start(request, investigation_id, thread, case, payload, clock):
         check_case(db, draft, thread, case)
         if draft.draft_version != payload.expected_draft_version:
             raise conflict("STALE_DRAFT_VERSION", draft)
-        if db.scalar(
+        if pending_generation(db, draft.state_id) or db.scalar(
             select(EvidenceRequest.request_id)
             .where(
                 EvidenceRequest.state_id == draft.state_id,
