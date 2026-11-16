@@ -1,8 +1,10 @@
 # OpsPilot AI — Possible Duplicates: Evidence Screen v0.1
 
+> **Current scope — 16 November 2026:** D-030–D-034 approve the evidence-first redesign before Task 5B. Case selection navigates only; evidence retrieval/reinspection/retry is explicit. The assistant and search/filters are deferred; Findings is unavailable. Local UI preservation adds no backend contract. The [UX Blueprint](UX_BLUEPRINT_V0.1.md) governs shared behavior, implementation increments, measurable UX-R acceptance criteria, and the explicit conflict register. Original examples are illustrative; they do not add records, API fields, or implemented features. Approval is design evidence, not implementation or accessibility verification.
+
 **Document type:** First-pass screen-level UX specification  
 **Phase:** Phase 2 — Screen-level UX Design  
-**Status:** Draft for product-owner review  
+**Status:** First-pass design amended by approved evidence-first redesign; implementation pending
 **Related documents:** `PRD_V0.1.md`, `UX_BLUEPRINT_V0.1.md`, `POSSIBLE_DUPLICATES_OVERVIEW_SCREEN_V0.1.md`, `PAYMENT_FAILURES_EVIDENCE_SCREEN_V0.1.md`
 
 ---
@@ -23,6 +25,15 @@ The presence of multiple internal attempts is an investigation signal. It is not
 
 This screen presents evidence and relationships. It does not decide whether a duplicate charge occurred or determine a root cause.
 
+
+### Current operation and presentation contract
+
+Use Blueprint §§3–6 and UX-R05–R21. Selecting a case or returning to Evidence does not POST. Without an active case, offer Select a case; without a response, show Not requested/count unknown in all groups. Inspect evidence, Inspect again, and eligible Retry are explicit whole-case operations using existing state/version/retry rules. All six source outcomes arrive in one terminal response; no per-source streaming/retry API is introduced. Preserve source execution, availability, match result, and completeness independently. Completed retrieval does not establish complete coverage. Failed/interrupted/not-evaluated counts are unknown, never zero.
+
+Readable compact rows and inline fields come before exact raw payload/technical disclosures. Keep record IDs, original timestamps/timezones/precision/missing reasons, synthetic provenance, matched fields, relationship category/basis/attribution, and limitations available. Material limitations stay visible beside affected evidence; consolidate repeated generic descriptions. Keep multiple records open. Relationship navigation reveals/focuses its target without another request or closing other records. Compact incident/case context remains visible on desktop without independent sticky source/record/toolbars. Mobile uses the thread/case drawer, not an assistant drawer. Current review progress stays Not started; no findings/review calls or controls.
+
+Session-local state restores per scoped investigation/state/thread/case while the page remains loaded. Full reload uses existing workspace resume and defaults to Payment failures → Overview/no case; it does not restore prior evidence responses or expose full durable request history. Workspace GET/reinspection are not numbered revisions or dataset refresh.
+
 ## 2. Entry point and navigation
 
 The engineer reaches this screen by selecting a possible-duplicate case from **Possible Duplicates → Overview**.
@@ -33,10 +44,10 @@ On entry:
 2. Select the clicked case as the active case.
 3. Keep the active case context visible at the top of the main workspace.
 4. Show all four evidence-source sections, even when a section has no matching records.
-5. Keep the Possible Duplicates thread selected in the left navigation.
-6. Keep the AI Assistant available on the right, using the Possible Duplicates thread and active case as its working context.
+5. Keep the Possible duplicates thread selected in desktop navigation or the mobile drawer.
+6. Keep thread/case context visible; the assistant is deferred and Findings unavailable. No evidence POST occurs until an explicit inspection.
 
-The engineer can navigate to Overview or Findings without losing the selected investigation thread. Returning to Evidence should preserve the active case when the current investigation revision is unchanged.
+The engineer can navigate to Overview and back without losing valid local thread/case context. Findings is unavailable. Reopening a saved numbered revision is a later feature, not this local state behavior.
 
 ## 3. Screen layout
 
@@ -44,14 +55,14 @@ The screen follows the approved investigation workspace structure:
 
 - **Incident Overview:** shared header at the top, including incident ID, category, severity, region, incident date/time, one-line description and Synthetic Data indicator.
 - **Investigation Threads:** left sidebar with Payment failures and Possible duplicates.
-- **Main Workspace:** center area with Overview, Evidence and Findings tabs.
-- **OpsPilot AI Assistant:** persistent, collapsible right-side panel.
+- **Main Workspace:** Overview and Evidence views, with Findings clearly unavailable.
+- **OpsPilot AI Assistant:** deferred; no panel or reserved third column.
 
 Within the center area, the Evidence screen contains:
 
 1. Active possible-duplicate case summary.
 2. Evidence completeness and interpretation notice.
-3. Optional case-level evidence search, if supported by the current MVP implementation.
+3. Explicit Inspect evidence / Inspect again / eligible Retry controls; no search/filter controls.
 4. Four source sections in a stable order.
 5. Inline-expanded record details and relationship explanations.
 
@@ -280,20 +291,13 @@ This is an evidence summary, not a finding or a final decision. Findings and hum
 
 The shared incident header continues to display the incident's relevant timezone, as defined in the UX Blueprint.
 
-## 12. Search and filtering
+## 12. Search and filtering — deferred
 
-For the MVP, prioritize simple case-level evidence discovery:
+D-030 defers evidence search and filters for the current dataset. Keep all four source headings visible. Source and record expand/collapse remains local navigation, not a search/filter or a new retrieval operation. No query builders, arbitrary date analytics, user-defined joins, or cross-incident search.
 
-- A search field may match identifiers and text present in the currently loaded evidence for the selected case.
-- If source-level filtering is provided, it should not hide the four source section headings themselves.
-- A search with no matches should show a clear no-results message and an easy way to clear the search.
-- Do not imply that search covers an external live system. It searches only the evidence available in the current synthetic dataset and investigation revision.
+## 13. AI Assistant behaviour — future requirement only
 
-Do not add advanced query builders, arbitrary date-range analytics or cross-incident search to this screen.
-
-## 13. AI Assistant behaviour
-
-The right-side AI Assistant remains available while the engineer inspects records.
+The assistant is deferred from this redesign: no right panel, chat control, or assistant call. The following requirements apply only if an assistant feature is separately authorized.
 
 Its working context follows the Possible Duplicates thread and selected case. It may help explain the meaning of a record, compare two attempts, or summarize the evidence currently available.
 
@@ -343,7 +347,7 @@ If an authorization, capture, settlement or bank outcome is not represented in t
 - Expanded/collapsed state must be announced and visually clear.
 - Use text labels in addition to status colors.
 - Keep identifiers selectable and readable without relying on color alone.
-- On narrower screens, the AI Assistant may collapse into a panel or drawer, but must retain the selected thread and case context.
+- On narrower screens use the accessible thread/case drawer and preserve valid local context; the assistant is absent. Apply the Blueprint responsive/WCAG 2.2 AA verification targets.
 - Preserve source grouping and active case context on smaller layouts.
 
 ## 16. Out of scope
@@ -374,7 +378,7 @@ The first-pass design is acceptable when:
 8. Multiple attempts are never presented as proof of multiple customer charges.
 9. An incomplete provider extract is never presented as proof that no duplicate charge occurred.
 10. Missing evidence, empty results, loading states and retrieval errors are distinguishable.
-11. The AI Assistant remains available and follows the Possible Duplicates thread and active case context.
+11. Thread/case navigation retains valid local context; the assistant is absent, Findings unavailable, and selection/expansion causes no automatic retrieval.
 12. The screen provides evidence for human investigation without making a final duplicate-charge or root-cause determination.
 
 ---

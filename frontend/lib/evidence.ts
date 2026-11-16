@@ -99,6 +99,10 @@ export function navigateEvidenceLink(event: MouseEvent<HTMLAnchorElement>): void
     .find(record => record.id === targetId);
   if (target) {
     target.open = true;
-    target.querySelector("summary")?.focus({ preventScroll: true });
+    // Native fragment navigation runs after this click handler and can reset
+    // focus. Focus the revealed summary after that default action has completed.
+    requestAnimationFrame(() => {
+      if (target.isConnected) target.querySelector("summary")?.focus({ preventScroll: true });
+    });
   }
 }

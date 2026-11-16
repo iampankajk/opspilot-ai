@@ -152,19 +152,30 @@ function relationshipNavigation() {
   return { links: elements.filter(n => n.type === "a"), details: elements.filter(n => n.type === "details" && n.props.id) };
 }
 
-test("relationship links reveal either collapsed target, focus its summary and retain native fragments", () => {
+test("relationship links reveal either target and focus after native fragment navigation", t => {
+  const frames = [];
+  const original = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = callback => { frames.push(callback); return frames.length; };
+  t.after(() => {
+    if (original === undefined) delete globalThis.requestAnimationFrame;
+    else globalThis.requestAnimationFrame = original;
+  });
   const { links, details } = relationshipNavigation();
   const focus = mock.fn();
-  const targets = details.map(d => ({ id: d.props.id, open: false, querySelector: () => ({ focus }) }));
+  const targets = details.map(d => ({ id: d.props.id, open: false, isConnected: true, querySelector: () => ({ focus }) }));
   for (const link of links) {
     const preventDefault = mock.fn();
     const event = { currentTarget: { getAttribute: () => link.props.href,
       closest: selector => { assert.equal(selector, ".evidence-panel"); return { querySelectorAll: () => targets }; } },
       button: 0, defaultPrevented: false, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, preventDefault };
     assert.equal(typeof link.props.onClick, "function");
+    const previousCalls = focus.mock.callCount();
     link.props.onClick(event);
     assert.equal(targets.find(t => `#${t.id}` === link.props.href).open, true);
     assert.equal(preventDefault.mock.callCount(), 0); // URL fragment/scroll and keyboard activation remain native.
+    assert.equal(focus.mock.callCount(), previousCalls); // Let the browser finish its default action first.
+    frames.shift()(0);
+    assert.equal(focus.mock.callCount(), previousCalls + 1);
   }
   assert.ok(targets.every(t => t.open)); // Opening another record never closes a previous target.
   assert.deepEqual(focus.mock.calls[0].arguments, [{ preventScroll: true }]);
@@ -174,6 +185,10 @@ test("relationship links reveal either collapsed target, focus its summary and r
   links[0].props.onClick({ button: 0, currentTarget: { getAttribute: () => links[0].props.href,
     closest: () => ({ querySelectorAll: () => targets }) } });
   assert.equal(targets[0].open, true);
+  targets[0].isConnected = false;
+  const previousCalls = focus.mock.callCount();
+  frames.shift()(0);
+  assert.equal(focus.mock.callCount(), previousCalls); // An unmounted scope must not take focus back.
 });
 
 test("modified relationship clicks keep the browser's new-tab behavior without changing disclosures", () => {

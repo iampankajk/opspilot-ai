@@ -23,14 +23,15 @@ export default function VisitorSessionPanel({ onNewSession }: { onNewSession?: (
   }
 
   return (
-    <section aria-labelledby="visitor-heading">
+    <section className="session-panel" aria-labelledby="visitor-heading">
       <h2 id="visitor-heading">Anonymous demo session</h2>
       <p>A lost or expired session cannot recover earlier work. Starting again creates a new visitor.</p>
       <p role="status" aria-live="polite">{busy ? "Initializing session…" : message}</p>
-      {session && <>
+      {session && <details className="technical-details">
+        <summary>Session details</summary>
         <p className="request-id">Visitor reference: <code>{session.visitor_context_id}</code></p>
         <p>Expires: <time dateTime={session.expires_at}>{session.expires_at}</time></p>
-      </>}
+      </details>}
       <button disabled={busy} onClick={() => void startOrReuse()}>Start or resume demo session</button>
     </section>
   );

@@ -4,17 +4,22 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createInvestigation, loadIncident, loadWorkspace, type IncidentEntry, type ThreadKind, type Workspace } from "../lib/investigations";
 
 import ThreadCases from "./case-list";
+import WorkspaceShell, { IncidentHeader, type WorkspaceView } from "./workspace-shell";
 
 export default function InvestigationPanel() {
   const [reference, setReference] = useState("INC-2026-1042");
   const [entry, setEntry] = useState<IncidentEntry | null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [selected, setSelected] = useState<ThreadKind>("payment_failures");
+  const [view, setView] = useState<WorkspaceView>("overview");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pending = useRef(new Set<AbortController>());
 
   function showWorkspace(result: Workspace) {
+    if (result.investigation_id !== workspace?.investigation_id || result.state_id !== workspace?.state_id) {
+      setSelected("payment_failures"); setView("overview");
+    }
     setWorkspace(result);
     const url = new URL(window.location.href);
     url.searchParams.set("investigation", result.investigation_id);
@@ -47,51 +52,50 @@ export default function InvestigationPanel() {
     setWorkspace(current => current && version > current.draft_version ? { ...current, draft_version: version } : current);
   }, []);
 
-  const incident = workspace?.incident ?? entry?.incident;
   return (
-    <section aria-labelledby="investigate-heading">
-      <h2 id="investigate-heading">Investigate an incident</h2>
-      <p>Use your demo session to open a synthetic incident. Each visitor has an independent workspace.</p>
-      <form onSubmit={event => {
-        event.preventDefault();
-        void run(signal => loadIncident(reference.trim(), signal), result => {
-          setEntry(result); setWorkspace(null);
-          const url = new URL(window.location.href); url.searchParams.delete("investigation");
-          window.history.replaceState(null, "", url);
-        });
-      }}>
-        <label htmlFor="incident-reference">Incident reference</label>
-        <input id="incident-reference" value={reference} onChange={event => setReference(event.target.value)}
-          required maxLength={128} disabled={busy} />
-        <button type="submit" disabled={busy}>Load incident</button>
-      </form>
+    <div className="investigation-panel">
+      <details className={`entry-panel ${workspace ? "entry-panel-compact" : ""}`} open={!workspace}>
+        <summary id="investigate-heading">{workspace ? "Open another incident" : "Open an investigation"}</summary>
+        <div className="entry-content">
+          <p>Start or resume your <a href="#demo-session" onClick={() => {
+            const details = document.querySelector<HTMLDetailsElement>(".session-disclosure");
+            if (details) { details.open = true; details.querySelector("summary")?.focus(); }
+          }}>demo session</a>, then load a known incident. Your investigation is independent of other visitors.</p>
+          <form onSubmit={event => {
+            event.preventDefault();
+            void run(signal => loadIncident(reference.trim(), signal), result => {
+              setEntry(result); setWorkspace(null);
+              const url = new URL(window.location.href); url.searchParams.delete("investigation");
+              window.history.replaceState(null, "", url);
+            });
+          }}>
+            <label htmlFor="incident-reference">Incident reference</label>
+            <input id="incident-reference" value={reference} onChange={event => setReference(event.target.value)}
+              required maxLength={128} disabled={busy} />
+            <button type="submit" disabled={busy}>Load incident</button>
+          </form>
+          {entry && !workspace && <IncidentHeader {...entry} />}
+          {entry && !workspace && <button disabled={busy} onClick={() => {
+            void run(signal => createInvestigation(entry.incident.incident_id, signal), showWorkspace);
+          }}>Create or resume investigation</button>}
+        </div>
+      </details>
       {busy && <p role="status">Loading workspace…</p>}
       {error && <p role="alert" className="failure">{error}</p>}
-      {incident && <div className="incident-context">
-        <p className="eyebrow">Synthetic data · {incident.incident_ref}</p>
-        <h3>{incident.title}</h3>
-        <p>{incident.severity ?? "Severity not supplied"} · {incident.region ?? "Region not supplied"}</p>
-        <p>{incident.incident_time.raw ?? "Incident time not supplied"}</p>
-        {incident.description && <p>{incident.description}</p>}
-      </div>}
-      {entry && !workspace && <button disabled={busy} onClick={() => {
-        void run(signal => createInvestigation(entry.incident.incident_id, signal), showWorkspace);
-      }}>Create or resume investigation</button>}
       {workspace && <>
-        <p className="request-id">Investigation: <code>{workspace.investigation_id}</code></p>
-        <p className="request-id">State: <code>{workspace.state_id}</code> · Draft version {workspace.draft_version}</p>
-        <p className="request-id">Pinned dataset: {workspace.dataset_version.version_label}</p>
-        <nav aria-label="Investigation threads" className="thread-nav">
-          {workspace.threads.map(thread => <button key={thread.thread_kind} disabled={busy}
-            aria-pressed={selected === thread.thread_kind} onClick={() => setSelected(thread.thread_kind)}>
-            {thread.label} · {thread.case_count} case{thread.case_count === 1 ? "" : "s"}
-          </button>)}
-        </nav>
-        <ThreadCases key={`${workspace.investigation_id}:${workspace.state_id}:${selected}`} workspace={workspace} thread={selected} onVersion={updateVersion} />
-        <button disabled={busy} onClick={() => void run(signal => loadWorkspace(workspace.investigation_id, signal), showWorkspace)}>
-          Reload saved workspace
-        </button>
+        <WorkspaceShell workspace={workspace} thread={selected} view={view}
+          onThread={thread => { if (thread !== selected) { setSelected(thread); setView("overview"); } }} onView={setView}>
+          <ThreadCases key={`${workspace.investigation_id}:${workspace.state_id}:${selected}`} workspace={workspace} thread={selected} onVersion={updateVersion} />
+        </WorkspaceShell>
+        <details className="technical-details workspace-details">
+          <summary>Workspace details</summary>
+          <p className="request-id">Investigation: <code>{workspace.investigation_id}</code></p>
+          <p className="request-id">State: <code>{workspace.state_id}</code> · Draft version {workspace.draft_version}</p>
+          <button disabled={busy} onClick={() => void run(signal => loadWorkspace(workspace.investigation_id, signal), showWorkspace)}>
+            Reload saved workspace
+          </button>
+        </details>
       </>}
-    </section>
+    </div>
   );
 }
