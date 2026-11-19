@@ -199,3 +199,16 @@ test("modified relationship clicks keep the browser's new-tab behavior without c
     assert.equal(closest.mock.callCount(), 0);
   }
 });
+
+test("retained panels use distinct record fragments scoped to the originating thread and case", () => {
+  const data = response();
+  data.relationships = [{ relationship_id: "self", from_record_id: "record", to_record_id: "record",
+    basis, attribution: "synthetic", limitations: [] }];
+  for (const prefix of ["payment_failures-case-a-", "possible_duplicates-case-b-"]) {
+    const html = renderToStaticMarkup(createElement(EvidenceView, { result: { status: "ready", data }, history: [],
+      selectedCase: { case_reference: "CASE" }, idPrefix: prefix, onInspect() {} }));
+    assert.ok(html.includes(`id="evidence-${prefix}record"`));
+    assert.ok(html.includes(`href="#evidence-${prefix}record"`));
+    assert.equal(html.includes('href="#evidence-record"'), false);
+  }
+});

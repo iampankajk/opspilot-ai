@@ -35,9 +35,10 @@ export function IncidentHeader({ incident, dataset_version }: IncidentEntry) {
   </header>;
 }
 
-export default function WorkspaceShell({ workspace, thread, view, onThread, onView, children }: {
+export default function WorkspaceShell({ workspace, thread, view, onThread, onView, children, caseNavigation, evidence, hasSelectedCase = false }: {
   workspace: Workspace; thread: ThreadKind; view: WorkspaceView;
   onThread: (thread: ThreadKind) => void; onView: (view: WorkspaceView) => void; children: ReactNode;
+  caseNavigation?: ReactNode; evidence?: ReactNode; hasSelectedCase?: boolean;
 }) {
   const activeThread = workspace.threads.find(item => item.thread_kind === thread)!;
   return <section ref={observeIncidentHeader} className="workspace-shell" aria-label="Incident workspace">
@@ -53,16 +54,15 @@ export default function WorkspaceShell({ workspace, thread, view, onThread, onVi
         </nav>
         <div className="rail-boundary">
           <p className="eyebrow">Cases</p>
-          <p>No active case</p>
-          <p className="muted">Case navigation is not yet available. Inspect cases in Overview.</p>
+          {caseNavigation ?? <p>No active case</p>}
         </div>
         <p className="rail-footnote">Read-only investigation<br />Synthetic demo environment</p>
       </aside>
-      <div className="workspace-content">
+      <div className="workspace-content" tabIndex={-1}>
         <div className="workspace-heading">
           <div>
             <p className="eyebrow">Investigation thread</p>
-            <h2 id="thread-heading">{activeThread.label}</h2>
+            <h2 id="thread-heading" tabIndex={-1}>{activeThread.label}</h2>
           </div>
           <span className="badge">{activeThread.case_count} configured case{activeThread.case_count === 1 ? "" : "s"}</span>
         </div>
@@ -75,14 +75,14 @@ export default function WorkspaceShell({ workspace, thread, view, onThread, onVi
           <button disabled>Findings <span>Unavailable</span></button>
         </nav>
         <div hidden={view !== "overview"} aria-labelledby="thread-heading">
-          <div className="section-heading"><h3>Case inspection</h3><span className="muted">Source-backed investigation</span></div>
           {children}
         </div>
-        {view === "evidence" && <section className="empty-state" aria-labelledby="select-case-heading">
+        <div hidden={view !== "evidence" || !hasSelectedCase}>{evidence}</div>
+        {view === "evidence" && !hasSelectedCase && <section className="empty-state" aria-labelledby="select-case-heading">
           <span className="empty-state-icon" aria-hidden="true">↳</span>
           <h3 id="select-case-heading">Select a case</h3>
-          <p>Evidence is scoped to an individual case. Dedicated case navigation is not yet available.</p>
-          <p>Open Overview to inspect a case and explicitly retrieve its evidence.</p>
+          <p>Evidence is scoped to an individual case. Choose a case in Overview or the case navigation.</p>
+          <p>Case selection opens Evidence. Retrieval requires an explicit inspection.</p>
           <button onClick={event => {
             onView("overview");
             // This button stays mounted across the controlled view change.
