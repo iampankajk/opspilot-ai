@@ -191,7 +191,7 @@ test("same-thread cases retain separate mounted panels and selection never inspe
   tree = h.render(); tree.props.children[0].props.children.props.onSelect("b"); tree = h.render();
   const panels = tree.props.evidence.flat().filter(Boolean);
   assert.equal(panels.length, 2); assert.deepEqual(panels.map(n => n.props.hidden), [true, false]);
-  assert.deepEqual(panels.map(n => n.props.children[2].props.selectedCase.case_id), ["a", "b"]);
+  assert.deepEqual(panels.map(n => n.props.children.find(child => child?.type === "evidence-panel").props.selectedCase.case_id), ["a", "b"]);
   tree.props.children[0].props.children.props.onSelect("a"); tree = h.render();
   assert.deepEqual(tree.props.evidence.flat().filter(Boolean).map(n => n.props.hidden), [false, true]);
   h.unmount();

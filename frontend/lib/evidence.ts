@@ -85,8 +85,15 @@ export async function inspectEvidence(scope: EvidenceScope, version: number, ret
 export function outcomeMessage(source: SourceOutcome): string {
   if (source.execution_status !== "completed") return `${source.source_name}: retrieval ${source.execution_status}. Record count unknown. Retry explicitly.`;
   if (source.availability !== "included") return `Source ${source.availability.replaceAll("_", " ")} in this dataset. Not evaluated.`;
+  if (source.match_status === "not_evaluated") return "Source not evaluated. Record count unknown.";
   if (source.match_status === "no_matches") return "No matching records found in the available synthetic dataset for this case.";
   return `${source.returned_count} matching record${source.returned_count === 1 ? "" : "s"} in the available synthetic dataset.`;
+}
+
+export function revealEvidenceRecord(target: HTMLDetailsElement): void {
+  let ancestor = target.parentElement?.closest("details");
+  while (ancestor) { ancestor.open = true; ancestor = ancestor.parentElement?.closest("details"); }
+  target.open = true;
 }
 
 // Keep the native fragment navigation after revealing its target in this case's panel.
@@ -98,7 +105,7 @@ export function navigateEvidenceLink(event: MouseEvent<HTMLAnchorElement>): void
   const target = Array.from(panel?.querySelectorAll<HTMLDetailsElement>("details[id]") ?? [])
     .find(record => record.id === targetId);
   if (target) {
-    target.open = true;
+    revealEvidenceRecord(target);
     // Native fragment navigation runs after this click handler and can reset
     // focus. Focus the revealed summary after that default action has completed.
     requestAnimationFrame(() => {

@@ -102,7 +102,8 @@ const require = createRequire(import.meta.url);
 const source = readFileSync(new URL("../app/evidence-view.tsx", import.meta.url), "utf8");
 let compiled = ts.transpileModule(source, { compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext } }).outputText;
 compiled = compiled.replace('"react/jsx-runtime"', JSON.stringify(pathToFileURL(require.resolve("react/jsx-runtime")).href))
-  .replace('"../lib/evidence.ts"', JSON.stringify(new URL("../lib/evidence.ts", import.meta.url).href));
+  .replace('"../lib/evidence.ts"', JSON.stringify(new URL("../lib/evidence.ts", import.meta.url).href))
+  .replace('"../lib/evidence-presentation.ts"', JSON.stringify(new URL("../lib/evidence-presentation.ts", import.meta.url).href));
 const { EvidenceView } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const render = result => renderToStaticMarkup(createElement(EvidenceView, { result, history: [],
   selectedCase: { case_reference: "CASE-FAIL-001" }, onInspect() {} }));
@@ -110,7 +111,7 @@ const render = result => renderToStaticMarkup(createElement(EvidenceView, { resu
 test("actual view keeps four source groups visible during loading without showing zero matches", () => {
   const html = render({ status: "loading" });
   for (const group of evidenceGroups) assert.ok(html.includes(group.label.replaceAll("&", "&amp;")));
-  assert.equal((html.match(/Loading source evidence/g) ?? []).length, 4);
+  assert.equal((html.match(/Loading source evidence/g) ?? []).length, 6);
   assert.match(html, /disabled=""/);
   assert.doesNotMatch(html, /No matching records|0 matching records/);
 });
@@ -118,7 +119,7 @@ test("actual view keeps four source groups visible during loading without showin
 test("actual view renders an actionable error without representing it as no evidence", () => {
   const html = render({ status: "failed", message: "The request timed out. Retry explicitly." });
   assert.match(html, /role="alert"/); assert.match(html, /Retry evidence/);
-  assert.equal((html.match(/Count unknown/g) ?? []).length, 4);
+  assert.equal((html.match(/Evidence unavailable after retrieval error/g) ?? []).length, 6);
   assert.doesNotMatch(html, /No matching records/);
 });
 
@@ -181,11 +182,12 @@ test("relationship links reveal either target and focus after native fragment na
   assert.deepEqual(focus.mock.calls[0].arguments, [{ preventScroll: true }]);
   assert.ok(details.every(d => d.props.open === undefined && d.props.onToggle === undefined));
   // Native collapse remains possible; navigating to a manually collapsed record reveals it again.
-  targets[0].open = false;
+  const firstTarget = targets.find(t => `#${t.id}` === links[0].props.href);
+  firstTarget.open = false;
   links[0].props.onClick({ button: 0, currentTarget: { getAttribute: () => links[0].props.href,
     closest: () => ({ querySelectorAll: () => targets }) } });
-  assert.equal(targets[0].open, true);
-  targets[0].isConnected = false;
+  assert.equal(firstTarget.open, true);
+  firstTarget.isConnected = false;
   const previousCalls = focus.mock.callCount();
   frames.shift()(0);
   assert.equal(focus.mock.callCount(), previousCalls); // An unmounted scope must not take focus back.
@@ -210,5 +212,164 @@ test("retained panels use distinct record fragments scoped to the originating th
     assert.ok(html.includes(`id="evidence-${prefix}record"`));
     assert.ok(html.includes(`href="#evidence-${prefix}record"`));
     assert.equal(html.includes('href="#evidence-record"'), false);
+  }
+});
+
+import { associationLabel, groupCount, recordSummary, summaryTimestamp } from "../lib/evidence-presentation.ts";
+import { revealEvidenceRecord } from "../lib/evidence.ts";
+function elements(node, result = []) {
+  if (Array.isArray(node)) node.forEach(child => elements(child, result));
+  else if (node?.props) { result.push(node); elements(node.props.children, result); }
+  return result;
+}
+const viewNodes = data => elements(EvidenceView({ result: { status: "ready", data }, history: [],
+  selectedCase: { case_reference: "CASE" }, onInspect() {} }));
+
+test("six source identities and unknown counts exist before a request, with one explicit action", () => {
+  for (const status of ["idle", "loading", "failed"]) {
+    const html = render({ status, message: "Retrieval interrupted; retry explicitly." });
+    assert.equal((html.match(/data-source=/g) ?? []).length, 6);
+    assert.equal((html.match(/class="evidence-group"/g) ?? []).length, 4);
+    assert.doesNotMatch(html, /0 returned records|null matching|No matching records/);
+    assert.equal((html.match(/<button/g) ?? []).length, 1);
+    if (status === "idle") assert.equal((html.match(/Not requested/g) ?? []).length, 6);
+  }
+});
+
+test("controlled source outcomes keep retrieval, availability, match, completeness and counts independent", () => {
+  const variants = [
+    { availability: "not_included", text: /not included/ },
+    { availability: "not_constructed", text: /not constructed/ },
+    { availability: "unavailable", text: /unavailable/ },
+    { availability: "included", text: /Source not evaluated/ },
+    { execution_status: "failed", text: /Retrieval failed/ },
+    { execution_status: "interrupted", text: /Retrieval interrupted/ },
+  ];
+  for (const { text, ...change } of variants) {
+    const data = response();
+    Object.assign(data.groups[2].sources[0], { match_status: "not_evaluated", returned_count: null, records: [], ...change });
+    if (change.execution_status) data.status = "partial";
+    const validated = parseCaseEvidence(data, scope);
+    const node = viewNodes(validated).find(n => n.props["data-source"] === "loki");
+    const local = renderToStaticMarkup(node);
+    assert.match(local, text); assert.match(local, /Count unknown/);
+    assert.match(local, /Evidence completeness: unverified/);
+    assert.doesNotMatch(local, /0 matching|No matching records|null matching/);
+    assert.equal(groupCount(data.groups[2].sources), "Count unknown");
+    if (change.execution_status) assert.match(render({ status: "ready", data }), /Retrieval partial/);
+  }
+  for (const completeness of ["unverified", "known_partial", "verified_for_stated_scope", "not_applicable"]) {
+    const data = response(); data.groups[1].sources[0].completeness = completeness;
+    assert.ok(render({ status: "ready", data }).includes(`Evidence completeness: ${completeness.replaceAll("_", " ")}`));
+  }
+});
+
+test("completed retrieval retains local provider and bank limitations without claiming complete evidence", () => {
+  const data = response();
+  data.groups[1].sources[0].limitations = ["Provider completeness is unverified.", "Bank/settlement evidence unavailable."];
+  const node = viewNodes(data).find(n => n.props["data-source"] === "stripe");
+  const html = renderToStaticMarkup(node);
+  assert.match(html, /Retrieval completed/); assert.match(html, /Evidence completeness: unverified/);
+  assert.match(html, /Provider completeness is unverified/); assert.match(html, /Bank\/settlement evidence unavailable/);
+  assert.doesNotMatch(html, /<details|Complete evidence/);
+});
+
+test("readable unknown/nested fields and exact amounts precede a closed original-payload disclosure", () => {
+  const data = response();
+  const payload = data.groups[1].sources[0].records[0].payload = {
+    "Internal attempt status": "Timeout; provider outcome initially unknown", "Amount/currency": "SGD 120.00",
+    "Unfamiliar field": { exact: "001.2300", missing: null, flags: [false, 0, "<script>alert(1)</script>"] },
+    "Idempotency key": "SYN-IDEM-DUP-001", "Settlement/bank posting evidence": "Not constructed",
+  };
+  const html = render({ status: "ready", data });
+  assert.match(html, /<dt>Amount\/currency<\/dt><dd>SGD 120.00<\/dd>/);
+  assert.match(html, /<dt>Unfamiliar field<\/dt>/); assert.match(html, /001.2300/); assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+  const original = viewNodes(data).find(n => n.props.className?.includes("original-payload"));
+  assert.equal(original.props.open, undefined);
+  const pre = elements(original).find(n => n.type === "pre");
+  assert.deepEqual(JSON.parse(pre.props.children), payload);
+  assert.ok(html.indexOf("<dt>Amount/currency") < html.indexOf("Original payload (JSON)"));
+  assert.equal(pre.props.tabIndex, 0);
+});
+
+test("source wording, timestamp roles/ranges and missing-time reasons remain exact", () => {
+  const rec = structuredClone(record);
+  rec.payload = { "Internal attempt status": "Succeeded" };
+  assert.deepEqual(recordSummary(rec), { label: "Internal attempt status", value: "Succeeded" });
+  rec.timestamps = [
+    { ...record.timestamps[0], role: "Event timestamps", raw: "Other event times not constructed", precision: "unknown" },
+    { ...record.timestamps[0], role: "Capture event time", raw: "10:17–10:18 SGT", precision: "minute_range" },
+  ];
+  assert.equal(summaryTimestamp(rec), rec.timestamps[1]);
+  const data = response(); data.groups[1].sources[0].records = [rec];
+  let html = render({ status: "ready", data });
+  assert.match(html, /Capture event time: 10:17–10:18 SGT/); assert.match(html, /Precision: minute_range/);
+  assert.match(html, /Other event times not constructed/);
+  rec.timestamps = [{ ...record.timestamps[0], raw: null, timezone: null, precision: "unknown", missing_reason: "Event not timestamped" }];
+  html = render({ status: "ready", data });
+  assert.match(html, /event: Not supplied · Timezone: Unknown · Precision: unknown · Event not timestamped/);
+  rec.timestamps = []; assert.match(render({ status: "ready", data }), /Source timestamp not supplied/);
+});
+
+test("contextual relationships retain category, attribution, basis and fields with accessible explanations", () => {
+  const data = response();
+  data.groups[1].sources[0].records.push({ ...structuredClone(record), evidence_record_id: "target" });
+  data.relationships = [{ relationship_id: "r", from_record_id: "record", to_record_id: "target", basis,
+    attribution: "Application-labelled synthetic association", limitations: ["A field match is not a verified charge."] }];
+  const nodes = viewNodes(data), links = nodes.filter(n => n.type === "a");
+  assert.equal(links.length, 2);
+  for (const link of links) {
+    const explanation = nodes.find(n => n.props.id === link.props["aria-describedby"]);
+    assert.ok(explanation); assert.match(renderToStaticMarkup(explanation), /Documented lookup: Candidate from lookup/);
+  }
+  const html = render({ status: "ready", data });
+  assert.match(html, /Application-labelled synthetic association/); assert.match(html, /A field match is not a verified charge/);
+  assert.match(html, /<dt>order<\/dt><dd>candidate/);
+  assert.match(html, /Category: documented_lookup/); assert.match(html, /Basis record: Not supplied/);
+  assert.deepEqual(["direct_ref_match", "documented_lookup", "field_match", "temporal_context", "unverified"].map(associationLabel),
+    ["Direct reference match", "Documented lookup", "Field match", "Temporal context", "Unverified association"]);
+  data.relationships[0].to_record_id = "missing";
+  assert.match(render({ status: "ready", data }), /Related record missing is unavailable in this response/);
+});
+
+test("relationship reveal opens enclosing source lists without closing any originating record", () => {
+  const outer = { open: false, parentElement: null };
+  const source = { open: false, parentElement: { closest: () => outer } };
+  const target = { open: false, parentElement: { closest: () => source } };
+  const origin = { open: true };
+  revealEvidenceRecord(target);
+  assert.ok(target.open && source.open && outer.open && origin.open);
+});
+
+test("seeded payload sets remain readable and intact, with each provider extract kept as one record", () => {
+  const fixture = JSON.parse(readFileSync(new URL("../../backend/fixtures/synthetic-payments-v0.1.json", import.meta.url), "utf8"));
+  for (const [i, seeded] of fixture.cases.entries()) {
+    const data = response(); data.thread_kind = seeded.thread_kinds[0];
+    for (const group of data.groups) for (const source of group.sources) {
+      const originals = fixture.records.filter(r => seeded.evidence_record_ids.includes(r.record_id) && r.source_key === source.source_key);
+      source.records = originals.map(r => ({ ...structuredClone(record), source_key: r.source_key, evidence_record_id: r.record_id,
+        source_name: r.payload["Source system"], payload: r.payload }));
+      source.returned_count = originals.length; source.match_status = originals.length ? "matches" : "no_matches";
+    }
+    assert.deepEqual(data.groups.map(g => g.sources.reduce((n, s) => n + s.returned_count, 0)), i ? [2, 1, 0, 3] : [1, 1, 2, 1]);
+    const originals = viewNodes(data).filter(n => n.props.className?.includes("original-payload"));
+    assert.equal(originals.length, seeded.evidence_record_ids.length);
+    for (const original of originals) {
+      assert.equal(original.props.open, undefined);
+      const pre = elements(original).find(n => n.type === "pre");
+      const id = pre.props["aria-label"].replace("Original payload for ", "");
+      assert.deepEqual(JSON.parse(pre.props.children), fixture.records.find(r => r.record_id === id).payload);
+    }
+    if (i) assert.match(render({ status: "ready", data }), /Multiple payment attempts do not establish multiple customer charges/);
+  }
+});
+
+test("possible-duplicate caution retains the financial-evidence gap before, during and after retrieval", () => {
+  for (const result of [{ status: "idle" }, { status: "loading" }, { status: "failed", message: "Interrupted" }, { status: "ready", data: response() }]) {
+    const html = renderToStaticMarkup(createElement(EvidenceView, { result, history: [], thread: "possible_duplicates",
+      selectedCase: { case_reference: "CASE-DUP" }, onInspect() {} }));
+    assert.match(html, /Multiple payment attempts do not establish multiple customer charges/);
+    assert.match(html, /Independent financial evidence, including bank\/settlement records, may still be missing/);
   }
 });

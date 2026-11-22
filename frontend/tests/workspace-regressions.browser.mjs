@@ -10,17 +10,19 @@ export async function checkWorkspaceRegressions(tab, viewport) {
     const target = tab.playwright.locator('[id$="-SYN-STRIPE-FAIL-001"]');
     const origin = tab.playwright.locator('[id$="-SYN-PO-ATT-001"]');
     if (await target.getAttribute("open") !== null) {
-      await target.locator("summary").press("Enter");
+      await target.locator(":scope > summary").press("Enter");
       await tab.playwright.domSnapshot();
     }
     if (await origin.getAttribute("open") === null) {
-      await origin.locator("summary").press("Enter");
+      await origin.locator(":scope > summary").press("Enter");
       await tab.playwright.domSnapshot();
     }
-    const relationships = tab.playwright.locator(".evidence-panel > details")
-      .filter({ hasText: "Record relationships and correlation explanations" });
-    if (await relationships.getAttribute("open") === null) {
-      await relationships.locator("summary").press("Enter");
+    // Relationships now live with their originating record. Collapse the target
+    // source list to prove traversal reveals both the source and target.
+    const providerRecords = tab.playwright.getByRole("region", { name: "Stripe / Payment Provider", exact: true })
+      .locator(".source-records");
+    if (await providerRecords.getAttribute("open") !== null) {
+      await providerRecords.locator(":scope > summary").press("Enter");
       await tab.playwright.domSnapshot();
     }
     const link = tab.playwright.locator('a[href$="-SYN-STRIPE-FAIL-001"]').first();
@@ -45,7 +47,7 @@ export async function checkWorkspaceRegressions(tab, viewport) {
         `Relationship summary must be visible below the header: ${JSON.stringify(geometry)}`);
       assert(new URL(await tab.url()).hash.endsWith("-SYN-STRIPE-FAIL-001"), "Native URL fragment must be retained");
       results.push({ ...size, activation, ...geometry });
-      await target.locator("summary").press("Enter");
+      await target.locator(":scope > summary").press("Enter");
       await tab.playwright.domSnapshot();
       assert(await target.getAttribute("open") === null, "Target must remain independently collapsible");
     }
@@ -147,15 +149,18 @@ export async function checkReviewHistoryRegressions(tab, viewport) {
     await tab.playwright.domSnapshot();
     const baseline = await snapshot();
     assert(baseline.panels === 2, 'Both returned Evidence panels must be retained before the history regression');
-    const relationships = tab.playwright.getByRole('region', { name: 'Evidence for CASE-FAIL-001', exact: true })
-      .locator('details').filter({ hasText: 'Record relationships and correlation explanations' });
-    if (await relationships.getAttribute('open') === null) {
-      await relationships.locator('summary').press('Enter'); await tab.playwright.domSnapshot();
+    const origin = tab.playwright.locator('[id$="-SYN-PO-ATT-001"]');
+    if (await origin.getAttribute('open') === null) {
+      await origin.locator(':scope > summary').press('Enter'); await tab.playwright.domSnapshot();
     }
     const link = tab.playwright.locator('a[href$="-SYN-STRIPE-FAIL-001"]').first();
     await link.press('Enter'); await tab.playwright.domSnapshot();
     const fragment = new URL(await tab.url()).hash;
     assert(fragment.endsWith('-SYN-STRIPE-FAIL-001'), 'Relationship URL fragment must be preserved');
+    // History must reveal a target whose enclosing list was collapsed after the link.
+    await tab.playwright.getByRole('region', { name: 'Stripe / Payment Provider', exact: true })
+      .filter({ visible: true }).locator('.source-records > summary').press('Enter');
+    await tab.playwright.domSnapshot();
     await view('Overview'); await thread('Possible duplicates');
     await traverse('back');
     assert((await snapshot()).view === 'Overview' && (await snapshot()).thread === 'Payment failures', 'Back must restore the failure Overview');
@@ -184,7 +189,7 @@ export async function checkReviewHistoryRegressions(tab, viewport) {
     for (const id of ['SYN-ZD-TICKET-002', 'SYN-ZD-ESCALATION-001']) {
       const record = tab.playwright.locator(`[id$="-${id}"]`);
       if (await record.getAttribute('open') === null) {
-        await record.locator('summary').press('Enter'); await tab.playwright.domSnapshot();
+        await record.locator(':scope > summary').press('Enter'); await tab.playwright.domSnapshot();
       }
     }
     await tab.scroll([size.width - 80, size.height - 100], 'down', 2);
@@ -236,7 +241,7 @@ export async function checkRetainedEvidenceKeyboardFocus(tab, viewport, onRestor
     for (const id of ['SYN-ZD-TICKET-002', 'SYN-ZD-ESCALATION-001']) {
       const record = tab.playwright.locator(`[id$="-${id}"]`);
       if (await record.getAttribute('open') === null) {
-        await record.locator('summary').press('Enter'); await tab.playwright.domSnapshot();
+        await record.locator(':scope > summary').press('Enter'); await tab.playwright.domSnapshot();
       }
     }
     // Exact QA sequence: Overview, reopen, scroll, Back, Tab to Evidence, Enter.

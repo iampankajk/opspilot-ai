@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { loadCases, type ThreadKind, type Workspace } from "../lib/investigations";
+import { revealEvidenceRecord } from "../lib/evidence.ts";
 import { initialLocation, invalidatesContext, locationKey, readLocation, workspaceScope, type CaseLocation } from "../lib/workspace-navigation";
 import CaseList, { CaseContext, type CaseListResult } from "./case-list";
 import EvidencePanel from "./evidence-panel";
@@ -161,7 +162,7 @@ export default function CaseWorkspace({ workspace, onVersion, onScopeError }: {
       } else {
         const record = target.hash ? document.getElementById(target.hash.slice(1)) : null;
         if (record instanceof HTMLDetailsElement && record.closest('.evidence-panel')?.getBoundingClientRect().height) {
-          record.open = true;
+          revealEvidenceRecord(record);
           record.querySelector("summary")?.focus({ preventScroll: true });
         } else if (target.focus === "history") {
           const candidates = Array.from(document.querySelectorAll<HTMLElement>(
@@ -242,7 +243,6 @@ export default function CaseWorkspace({ workspace, onVersion, onScopeError }: {
       return list?.status === "ready" && list.cases.filter(c => visited.includes(contextId(thread, c.case_id))).map(c =>
         <div key={`${thread}:${c.case_id}`} onClick={navigateRecord} hidden={location.thread !== thread || location.caseId !== c.case_id}>
           <CaseContext selectedCase={c} contextId={contextId(thread, c.case_id)} />
-          {thread === "possible_duplicates" && <p className="case-limitation">Multiple payment attempts do not necessarily mean multiple customer charges. Provider completeness is unverified; bank/settlement evidence is unavailable.</p>}
           <EvidencePanel workspace={workspace} thread={thread} selectedCase={c} onVersion={onVersion}
             onScopeError={onScopeError} />
         </div>);

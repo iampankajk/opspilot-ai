@@ -62,6 +62,6 @@ export default function EvidencePanel({ workspace, thread, selectedCase, onVersi
     } finally { if (controller.current === active) controller.current = null; }
   }
 
-  return <EvidenceView idPrefix={`${thread}-${selectedCase.case_id}-`} result={result} retry={retry} history={history}
+  return <EvidenceView idPrefix={`${thread}-${selectedCase.case_id}-`} thread={thread} result={result} retry={retry} history={history}
     selectedCase={selectedCase} onInspect={() => void inspect()} />;
 }

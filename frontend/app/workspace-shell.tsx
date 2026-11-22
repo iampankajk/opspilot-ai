@@ -68,7 +68,7 @@ export default function WorkspaceShell({ workspace, thread, view, onThread, onVi
         </div>
         <p className="thread-description">{thread === "payment_failures"
           ? "Review reported payment failures and inspect the available source evidence."
-          : "Review reports of possible duplicate charges. Multiple attempts do not establish multiple charges."}</p>
+          : "Review reports of possible duplicate charges and inspect the available source evidence."}</p>
         <nav className="workspace-tabs" aria-label="Workspace views">
           <button aria-current={view === "overview" ? "page" : undefined} onClick={() => onView("overview")}>Overview</button>
           <button aria-current={view === "evidence" ? "page" : undefined} onClick={() => onView("evidence")}>Evidence</button>

@@ -119,3 +119,11 @@ test("shell measures header changes and disconnects its observer when unmounted"
     else globalThis.ResizeObserver = original;
   }
 });
+
+test("duplicate thread description leaves the interpretation caution to case evidence", () => {
+  for (const view of ["overview", "evidence"]) {
+    const html = render({ thread: "possible_duplicates", view });
+    assert.match(html, /Review reports of possible duplicate charges and inspect the available source evidence/);
+    assert.doesNotMatch(html, /Multiple (?:payment )?attempts do not/);
+  }
+});
