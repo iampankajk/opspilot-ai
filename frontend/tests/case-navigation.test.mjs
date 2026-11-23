@@ -21,6 +21,7 @@ function component(name, imports = {}, hooks = {}) {
     if (id.includes("workspace-navigation")) return navigation;
     if (id.includes("lib/investigations")) return { ...api, ...imports.api };
     if (id.includes("lib/evidence")) return imports.evidence;
+    if (id.includes("lib/visitor-session")) return imports.session;
     if (id === "./case-list") return { __esModule: true, default: "CaseList", CaseContext: "CaseContext" };
     if (id === "./evidence-view") return { EvidenceView: "EvidenceView" };
     return { __esModule: true, default: id.slice(2) };
@@ -260,7 +261,7 @@ test("delayed workspace GET cannot restore context after inspection invalidates 
     assert.equal(elements(tree).some(n => n.type === "case-workspace"), false);
     if (!ineffectiveAbort) assert.equal(signal.aborted, true);
     const recovery = elements(tree).find(n => n.type === "button" && n.props.children.trim() === "Reload saved workspace");
-    assert.equal(recovery.props.disabled, false); // Invalidation releases busy state.
+    assert.equal(recovery.props["aria-disabled"], false); // Invalidation releases busy state.
     recovery.props.onClick(); await settle();
     assert.equal(elements(h.render()).find(n => n.type === "case-workspace").props.workspace.state_id, "recovered-state");
     delayed.resolve(workspace); await settle();
@@ -360,4 +361,31 @@ test("long visible Evidence content remains a non-scrolling focus fallback", t =
   const { node, trigger, panel } = focusFixture(t), payload = node({ top: 160, height: 1200, native: false });
   assert.equal(focusRetainedEvidence(panel([], [payload]), trigger), payload);
   assert.deepEqual(payload.calls, [{ preventScroll: true }]); assert.equal(window.scrollY, 2125.5);
+});
+
+test("retained focus skips a nested summary with geometry inside a closed outer record", t => {
+  const { focusRetainedEvidence } = component('case-workspace');
+  const { node, trigger, panel } = focusFixture(t), nested = node(), visible = node();
+  const outer = { querySelector: () => ({ contains: () => false }) };
+  const inner = { querySelector: () => ({ contains: () => true }), parentElement: { closest: () => outer } };
+  nested.closest = selector => selector === '[hidden]' ? null : inner;
+  assert.equal(focusRetainedEvidence(panel([nested, visible]), trigger), visible);
+  assert.deepEqual(nested.calls, []);
+  assert.equal(window.scrollY, 2125.5);
+});
+
+test("busy session control remains focusable and ignores reactivation until explicit retry", async () => {
+  const pending = deferred(); let calls = 0;
+  const h = mount('visitor-session-panel', {}, { session: { bootstrapVisitorSession() { calls++; return pending.promise; } } });
+  const button = tree => elements(tree).find(n => n.type === 'button');
+  button(h.render()).props.onClick();
+  const busy = button(h.render());
+  assert.equal(busy.props.disabled, undefined);
+  assert.equal(busy.props['aria-disabled'], true);
+  busy.props.onClick(); assert.equal(calls, 1);
+  pending.reject(new Error('Session unavailable. Retry explicitly.')); await settle();
+  const recovered = h.render();
+  assert.equal(button(recovered).props['aria-disabled'], false);
+  assert.match(renderToStaticMarkup(recovered), /Session unavailable/);
+  assert.equal(calls, 1);
 });

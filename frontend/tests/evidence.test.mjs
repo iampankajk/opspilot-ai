@@ -112,8 +112,32 @@ test("actual view keeps four source groups visible during loading without showin
   const html = render({ status: "loading" });
   for (const group of evidenceGroups) assert.ok(html.includes(group.label.replaceAll("&", "&amp;")));
   assert.equal((html.match(/Loading source evidence/g) ?? []).length, 6);
-  assert.match(html, /disabled=""/);
+  assert.match(html, /aria-disabled="true"/);
   assert.doesNotMatch(html, /No matching records|0 matching records/);
+});
+
+test("busy evidence action stays focusable but ignores repeated keyboard/pointer activation", () => {
+  const inspect = mock.fn();
+  for (const status of ["loading", "idle", "ready"]) {
+    const tree = EvidenceView({ result: status === "ready" ? { status, data: response() } : { status },
+      history: [], selectedCase: { case_reference: "CASE-FAIL-001" }, onInspect: inspect });
+    const button = tree.props.children[0].props.children[1];
+    assert.equal(button.props.disabled, undefined);
+    assert.equal(button.props["aria-disabled"], status === "loading");
+    button.props.onClick();
+  }
+  assert.equal(inspect.mock.callCount(), 2);
+});
+
+test("evidence has one persistent atomic status region and source-named native disclosures", () => {
+  for (const status of ["idle", "loading", "failed", "ready"]) {
+    const html = render(status === "ready" ? { status, data: response() } : { status, message: "Retry explicitly" });
+    assert.equal((html.match(/role="status"/g) ?? []).length, 1);
+    assert.match(html, /role="status" aria-atomic="true"/);
+    assert.equal((html.match(/role="alert"/g) ?? []).length, status === "failed" ? 1 : 0);
+    if (status === "loading") assert.match(html, /Retrieving case evidence\. Source counts are unknown/);
+    if (status === "ready") assert.match(html, /<summary><span class="sr-only">Stripe \/ Payment Provider · <\/span>Records \(1\)/);
+  }
 });
 
 test("actual view renders an actionable error without representing it as no evidence", () => {

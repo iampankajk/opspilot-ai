@@ -13,8 +13,11 @@ const contextId = (thread: ThreadKind, caseId: string) => `case-${thread}-${case
 
 function visibleFocusTarget(node: HTMLElement, headerBottom: number, fully = true) {
   if (!node.isConnected || node.closest("[hidden]") || !node.getClientRects().length) return false;
-  const closed = node.closest("details:not([open])");
-  if (closed && !closed.querySelector(":scope > summary")?.contains(node)) return false;
+  // Closed details may retain descendant geometry in the browser. A summary
+  // inside another closed record is still hidden, even if its own details exist.
+  for (let closed = node.closest("details:not([open])"); closed; closed = closed.parentElement?.closest("details:not([open])") ?? null) {
+    if (!closed.querySelector(":scope > summary")?.contains(node)) return false;
+  }
   const rect = node.getBoundingClientRect();
   const top = Math.max(0, headerBottom) + 8, bottom = window.innerHeight - 8;
   return rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.left < window.innerWidth &&

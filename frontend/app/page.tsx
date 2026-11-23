@@ -56,7 +56,9 @@ export default function Home() {
 
   return (
     <main id="main-content">
-      <a className="skip-link" href="#investigate-heading">Skip to investigation</a>
+      <a className="skip-link" href="#investigate-heading" onClick={() => {
+        document.getElementById("investigate-heading")?.focus();
+      }}>Skip to investigation</a>
       <header className="app-bar">
         <a className="brand" href="/" aria-label="OpsPilot AI home"><span className="brand-mark" aria-hidden="true">O</span>OpsPilot <span>AI</span></a>
         <p className="app-caption">Incident investigation workspace</p>

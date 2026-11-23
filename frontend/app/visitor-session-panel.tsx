@@ -32,7 +32,7 @@ export default function VisitorSessionPanel({ onNewSession }: { onNewSession?: (
         <p className="request-id">Visitor reference: <code>{session.visitor_context_id}</code></p>
         <p>Expires: <time dateTime={session.expires_at}>{session.expires_at}</time></p>
       </details>}
-      <button disabled={busy} onClick={() => void startOrReuse()}>Start or resume demo session</button>
+      <button aria-disabled={busy} onClick={() => { if (!busy) void startOrReuse(); }}>Start or resume demo session</button>
     </section>
   );
 }

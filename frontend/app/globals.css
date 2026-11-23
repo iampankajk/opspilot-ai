@@ -1,6 +1,6 @@
 :root { color-scheme: light; font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #202e3e; background: #f3f5f8; --border: #dce2e9; --muted: #566477; --accent: #245bce; }
 * { box-sizing: border-box; }
-body { margin: 0; font-size: 14px; }
+body { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
 main { width: 100%; padding: 0 32px 32px; }
 h1, h2, h3 { line-height: 1.3; letter-spacing: -.025em; }
 h1 { font-size: clamp(1.25rem, 2vw, 1.65rem); margin: 4px 0 0; font-weight: 650; }
@@ -12,13 +12,14 @@ a { color: #214fae; text-underline-offset: 3px; }
 .success { color: #126340; font-weight: 700; }
 .failure { color: #9c2424; font-weight: 700; }
 .request-id { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
-button { border: 1px solid transparent; border-radius: 6px; padding: 10px 16px; background: var(--accent); color: white; font: inherit; font-weight: 600; cursor: pointer; min-height: 40px; }
-button:hover:not(:disabled) { background: #1948ad; }
-button:disabled { background: #edf0f4; color: #647084; cursor: not-allowed; }
+button { border: 1px solid transparent; border-radius: 6px; padding: 10px 16px; background: var(--accent); color: white; font: inherit; font-weight: 600; cursor: pointer; min-height: 44px; }
+/* Keep primary hover below component variants and their selected states. */
+button:where(:hover:not(:disabled):not([aria-disabled="true"])) { background: #1948ad; }
+button:disabled, button[aria-disabled="true"] { background: #edf0f4; color: #647084; cursor: not-allowed; }
 :where(button, input, a, summary):focus-visible { outline: 3px solid #a45400; outline-offset: 3px; }
 .evidence-panel [tabindex="-1"]:focus-visible { outline: 3px solid #a45400; outline-offset: 3px; }
-summary { cursor: pointer; min-height: 32px; padding: 6px 0; font-weight: 600; }
-input { font: inherit; padding: 10px 12px; border: 1px solid #8b99ac; border-radius: 6px; min-width: 0; width: 100%; color: inherit; background: white; }
+summary { cursor: pointer; min-height: 36px; padding: 8px 0; font-weight: 600; }
+input { font: inherit; padding: 10px 12px; border: 1px solid #748399; border-radius: 6px; min-width: 0; width: 100%; color: inherit; background: white; }
 .muted { color: var(--muted); }
 .badge { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 5px; padding: 5px 9px; background: #f8f9fb; font-size: 12px; font-weight: 600; }
 .synthetic-badge { background: #edf7f3; border-color: #bedbcf; color: #246048; flex-shrink: 0; }
@@ -29,7 +30,7 @@ input { font: inherit; padding: 10px 12px; border: 1px solid #8b99ac; border-rad
 .app-caption { color: var(--muted); font-size: 12px; }
 .session-disclosure { margin-left: auto; }
 .session-disclosure > summary { border: 1px solid var(--border); background: white; padding: 8px 12px; border-radius: 6px; font-size: 12px; }
-.session-panel { position: absolute; right: 32px; top: 66px; z-index: 5; width: min(440px, calc(100% - 32px)); padding: 20px; background: white; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px #192b451a; }
+.session-panel { position: absolute; right: 32px; top: 66px; z-index: 5; width: min(440px, calc(100% - 32px)); max-height: calc(100dvh - 80px); overflow: auto; padding: 20px; background: white; border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 32px #192b451a; }
 .session-panel h2 { font-size: 17px; }
 .entry-panel { border: 1px solid var(--border); border-radius: 8px; background: white; margin: 32px auto; max-width: 900px; }
 .entry-panel > summary { padding: 18px 24px; font-size: 18px; }
@@ -132,7 +133,7 @@ input { font: inherit; padding: 10px 12px; border: 1px solid #8b99ac; border-rad
 .related-records { margin: 16px 0 12px; }
 .related-records > h6 { margin: 0 0 8px; }
 .record-relationship { margin: 10px 0; font-size: 12px; }
-.record-relationship > a { display: inline-block; padding: 4px 0; font-weight: 600; }
+.record-relationship > a { display: inline-block; min-height: 32px; padding: 7px 0; font-weight: 600; }
 .record-relationship .evidence-disclosure { border: 0; }
 .original-timestamp { margin: 8px 0; }
 .evidence-panel pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; background: #f5f7fa; padding: 12px; }
@@ -143,16 +144,17 @@ input { font: inherit; padding: 10px 12px; border: 1px solid #8b99ac; border-rad
 }
 /* Native fragment scrolling and focused summaries must clear the actual sticky
    header. The measured height is enabled only at the sticky breakpoint below. */
-.workspace-shell [id^="evidence-"], .workspace-shell [id^="evidence-"] > summary, .workspace-tabs button {
+.workspace-shell :where([tabindex], button, summary, a, [id]) {
   scroll-margin-block-start: calc(var(--sticky-header-height) + 1rem);
 }
 .sr-only, .skip-link:not(:focus) { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.skip-link:focus { display: block; padding: 12px; background: white; }
+.skip-link:focus { position: fixed; top: 8px; left: 8px; z-index: 10; display: block; padding: 12px; background: white; }
+.workspace-content:focus-visible { outline: 3px solid #a45400; outline-offset: -3px; }
 [hidden] { display: none !important; }
 @media (min-width: 1100px) and (min-height: 750px) {
   .workspace-shell { --sticky-header-height: var(--incident-header-height, 0px); }
   .workspace-shell > .incident-header { position: sticky; top: 0; z-index: 2; box-shadow: 0 1px 0 var(--border); }
-  .workspace-rail { align-self: start; position: sticky; top: calc(var(--sticky-header-height) + 1rem); }
+  .workspace-rail { align-self: start; position: sticky; top: calc(var(--sticky-header-height) + 1rem); max-height: calc(100dvh - var(--sticky-header-height) - 2rem); overflow-y: auto; }
 }
 @media (max-width: 1050px) {
   main { padding: 0 20px 24px; }
@@ -165,9 +167,7 @@ input { font: inherit; padding: 10px 12px; border: 1px solid #8b99ac; border-rad
   .app-bar { gap: 12px; min-height: 68px; }
   .app-caption { display: none; }
   .workspace-layout { grid-template-columns: minmax(0, 1fr); }
-  .workspace-rail { border-right: 0; border-bottom: 1px solid var(--border); padding: 16px; }
-  .thread-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 0; }
-  .rail-boundary, .rail-footnote { display: none; }
+  .workspace-rail { display: none; }
   .workspace-content, .incident-header { padding: 18px 16px; }
   .incident-heading { flex-wrap: wrap; gap: 12px; }
   .workspace-tabs { gap: 16px; }
@@ -209,6 +209,25 @@ input { font: inherit; padding: 10px 12px; border: 1px solid #8b99ac; border-rad
   .case-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 14px; }
 }
 @media (max-width: 720px) {
-  .case-row { padding: 16px 8px; }
+  .case-row { grid-template-columns: minmax(0, 1fr); padding: 16px 8px; }
   .case-context-payment { display: block; margin: 6px 0 0; }
+}
+
+/* Native dialog owns modal semantics, Escape and focus return. The rail and
+   drawer share navigation callbacks; resizing never remounts evidence. */
+.mobile-navigation-trigger { display: none; }
+.navigation-drawer { color: inherit; background: #f8f9fb; border: 1px solid #8b99ac; padding: 20px; margin: 0; width: min(360px, 100%); max-width: 100%; height: 100dvh; max-height: 100dvh; overflow-y: auto; overscroll-behavior: contain; }
+.navigation-drawer::backdrop { background: #14223880; }
+.drawer-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 24px; }
+.drawer-heading h2 { font-size: 1.1rem; }
+.navigation-drawer .thread-nav { grid-template-columns: minmax(0, 1fr); margin-bottom: 24px; }
+.navigation-drawer :focus-visible { outline: 3px solid #a45400; outline-offset: 2px; }
+@media (max-width: 720px) {
+  .mobile-navigation-trigger { display: block; margin: 16px; }
+  .evidence-panel summary, .case-identifiers > summary { min-height: 44px; }
+  .record-relationship > a { min-height: 44px; padding: 12px 0; }
+  .empty-state { padding: 24px 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }

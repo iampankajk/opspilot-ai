@@ -13,7 +13,7 @@ const source = readFileSync(new URL("../app/workspace-shell.tsx", import.meta.ur
 const compiled = ts.transpileModule(source, { compilerOptions: {
   jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext,
 } }).outputText.replace('"react/jsx-runtime"', JSON.stringify(pathToFileURL(require.resolve("react/jsx-runtime")).href));
-const { default: WorkspaceShell, IncidentHeader } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { default: WorkspaceShell, IncidentHeader, containDrawerFocus, observeNavigationDrawer } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
 const workspace = {
   incident: { incident_ref: "INC-TEST", title: "Payment incident", severity: "SEV-2", region: "APAC", category: "Payments",
     description: "Source-supplied description", incident_time: { raw: "10:30 AM SGT", timezone: "Asia/Singapore" } },
@@ -126,4 +126,80 @@ test("duplicate thread description leaves the interpretation caution to case evi
     assert.match(html, /Review reports of possible duplicate charges and inspect the available source evidence/);
     assert.doesNotMatch(html, /Multiple (?:payment )?attempts do not/);
   }
+});
+
+test("mobile navigation opens one named native modal without invoking retrieval or navigation", () => {
+  const onThread = mock.fn(), onView = mock.fn(), showModal = mock.fn(), focus = mock.fn(), setAttribute = mock.fn();
+  const nodes = elements(WorkspaceShell({ ...props, onThread, onView }));
+  const trigger = nodes.find(n => n.props.className === "mobile-navigation-trigger");
+  const dialog = nodes.find(n => n.type === "dialog");
+  assert.equal(trigger.props["aria-haspopup"], "dialog");
+  assert.equal(trigger.props["aria-controls"], dialog.props.id);
+  assert.equal(dialog.props["aria-labelledby"], "drawer-heading");
+  const nativeDialog = { open: false, showModal, querySelector: () => ({ focus }) };
+  const event = { currentTarget: { setAttribute, closest: () => ({ querySelector: () => nativeDialog }) } };
+  trigger.props.onClick(event);
+  assert.equal(showModal.mock.callCount(), 1);
+  assert.equal(focus.mock.callCount(), 1);
+  assert.deepEqual(setAttribute.mock.calls[0].arguments, ["aria-expanded", "true"]);
+  nativeDialog.open = true; trigger.props.onClick(event);
+  assert.equal(showModal.mock.callCount(), 1);
+  assert.equal(onThread.mock.callCount() + onView.mock.callCount(), 0);
+});
+
+test("drawer Tab boundaries wrap in both directions and skip hidden controls", () => {
+  const original = globalThis.document;
+  const first = { getClientRects: () => [1], focus: mock.fn() }, last = { getClientRects: () => [1], focus: mock.fn() };
+  const hidden = { getClientRects: () => [], focus: mock.fn() };
+  const preventDefault = mock.fn();
+  try {
+    globalThis.document = { activeElement: last };
+    const event = { key: "Tab", shiftKey: false, currentTarget: { querySelectorAll: () => [first, hidden, last] }, preventDefault };
+    containDrawerFocus(event); assert.equal(first.focus.mock.callCount(), 1);
+    document.activeElement = first; containDrawerFocus({ ...event, shiftKey: true });
+    assert.equal(last.focus.mock.callCount(), 1);
+    document.activeElement = hidden; containDrawerFocus(event);
+    containDrawerFocus({ ...event, key: "Enter" });
+    assert.equal(preventDefault.mock.callCount(), 2);
+    assert.equal(hidden.focus.mock.callCount(), 0);
+  } finally { globalThis.document = original; }
+});
+
+test("drawer close preserves later content focus; desktop resize dismisses modality and cleans listeners", () => {
+  const originalDocument = globalThis.document, originalWindow = globalThis.window;
+  const events = {}, mediaEvents = {};
+  const trigger = { setAttribute: mock.fn(), focus: mock.fn() }, desktop = { focus: mock.fn() };
+  const media = { matches: true, addEventListener: (name, callback) => mediaEvents[name] = callback,
+    removeEventListener: mock.fn() };
+  const dialog = { open: true, contains: node => node === dialog,
+    addEventListener: (name, callback) => events[name] = callback, removeEventListener: mock.fn(),
+    close: mock.fn(() => { dialog.open = false; }),
+    closest: () => ({ querySelector: selector => selector === ".mobile-navigation-trigger" ? trigger : desktop }) };
+  try {
+    globalThis.document = { activeElement: dialog, body: {} };
+    globalThis.window = { matchMedia: () => media };
+    const cleanup = observeNavigationDrawer(dialog);
+    events.close(); assert.equal(trigger.focus.mock.callCount(), 1);
+    document.activeElement = { contentHeading: true }; events.close();
+    assert.equal(trigger.focus.mock.callCount(), 1);
+    media.matches = false; mediaEvents.change();
+    assert.equal(dialog.close.mock.callCount(), 1);
+    assert.equal(desktop.focus.mock.callCount(), 1);
+    cleanup();
+    assert.equal(dialog.removeEventListener.mock.callCount(), 1);
+    assert.equal(media.removeEventListener.mock.callCount(), 1);
+  } finally { globalThis.document = originalDocument; globalThis.window = originalWindow; }
+});
+
+test("case activation closes the drawer in capture phase before case focus/navigation", () => {
+  const original = globalThis.Element;
+  globalThis.Element = class { closest(selector) { return selector === ".case-nav button" ? this : null; } };
+  try {
+    const dialog = elements(WorkspaceShell(props)).find(n => n.type === "dialog");
+    const close = mock.fn();
+    dialog.props.onClickCapture({ target: new Element(), currentTarget: { close } });
+    assert.equal(close.mock.callCount(), 1);
+    dialog.props.onClickCapture({ target: {}, currentTarget: { close } });
+    assert.equal(close.mock.callCount(), 1);
+  } finally { globalThis.Element = original; }
 });

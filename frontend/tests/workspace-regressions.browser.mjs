@@ -275,7 +275,13 @@ export async function checkRetainedEvidenceKeyboardFocus(tab, viewport, onRestor
     const sequence = await tab.playwright.evaluate(() => {
       const active = document.activeElement;
       const controls = Array.from(document.querySelectorAll('button, a[href], summary, input, [tabindex]'))
-        .filter(n => n.tabIndex >= 0 && !n.disabled && n.getClientRects().length > 0 && !n.closest('[hidden]'));
+        .filter(n => {
+          if (n.tabIndex < 0 || n.disabled || !n.getClientRects().length || n.closest('[hidden]')) return false;
+          for (let parent = n.parentElement; parent; parent = parent.parentElement) {
+            if (parent.matches('details:not([open])') && !parent.querySelector(':scope > summary')?.contains(n)) return false;
+          }
+          return true;
+        });
       const order = Array.from(document.querySelectorAll('body *')), position = order.indexOf(active);
       const key = n => n && [n.tagName, n.id, n.textContent.slice(0, 130)].join('|');
       return { next: key(controls.find(n => order.indexOf(n) > position)),

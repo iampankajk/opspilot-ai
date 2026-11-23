@@ -3,6 +3,47 @@ import type { IncidentEntry, ThreadKind, Workspace } from "../lib/investigations
 
 export type WorkspaceView = "overview" | "evidence";
 
+// Native modal semantics make the rest of the page inert. Keep the Tab loop
+// explicit so the last control does not send keyboard focus to browser chrome.
+export function containDrawerFocus(event: React.KeyboardEvent<HTMLDialogElement>) {
+  if (event.key !== "Tab") return;
+  const dialog = event.currentTarget;
+  const controls = Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), a[href], summary, [tabindex="0"]'))
+    .filter(node => node.getClientRects().length > 0);
+  const first = controls[0], last = controls.at(-1);
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+}
+
+export function observeNavigationDrawer(dialog: HTMLDialogElement | null) {
+  if (!dialog) return;
+  const shell = dialog.closest(".workspace-shell")!;
+  const trigger = shell.querySelector<HTMLButtonElement>(".mobile-navigation-trigger")!;
+  const narrow = window.matchMedia("(max-width: 720px)");
+  const reset = () => {
+    trigger.setAttribute("aria-expanded", "false");
+    // close() restores native invoking focus synchronously. Do not steal focus
+    // from case selection, which may already have moved into the content.
+    if (document.activeElement === document.body || dialog.contains(document.activeElement)) {
+      if (narrow.matches) trigger.focus();
+      else shell.querySelector<HTMLElement>('.workspace-rail button[aria-current="true"], .workspace-rail button[aria-pressed="true"]')?.focus();
+    }
+  };
+  const resize = () => {
+    if (!narrow.matches && dialog.open) {
+      dialog.close(); reset();
+      shell.querySelector<HTMLElement>('.workspace-rail button[aria-current="true"], .workspace-rail button[aria-pressed="true"]')?.focus();
+    }
+  };
+  dialog.addEventListener("close", reset);
+  narrow.addEventListener("change", resize);
+  return () => {
+    dialog.removeEventListener("close", reset);
+    narrow.removeEventListener("change", resize);
+    if (dialog.open) dialog.close();
+  };
+}
+
 function observeIncidentHeader(shell: HTMLElement | null) {
   const header = shell?.querySelector<HTMLElement>(":scope > .incident-header");
   if (!shell || !header) return;
@@ -41,22 +82,33 @@ export default function WorkspaceShell({ workspace, thread, view, onThread, onVi
   caseNavigation?: ReactNode; evidence?: ReactNode; hasSelectedCase?: boolean;
 }) {
   const activeThread = workspace.threads.find(item => item.thread_kind === thread)!;
+  const navigation = <>
+    <p className="eyebrow rail-label">Investigation threads</p>
+    <nav aria-label="Investigation threads" className="thread-nav">
+      {workspace.threads.map(item => <button key={item.thread_kind}
+        aria-pressed={thread === item.thread_kind} onClick={() => onThread(item.thread_kind)}>
+        <span>{item.label}</span><span className="thread-count">{item.case_count}<span className="sr-only"> configured case{item.case_count === 1 ? "" : "s"}</span></span>
+      </button>)}
+    </nav>
+    <div className="rail-boundary">
+      <p className="eyebrow">Cases</p>
+      {caseNavigation ?? <p>No active case</p>}
+    </div>
+    <p className="rail-footnote">Read-only investigation<br />Synthetic demo environment</p>
+  </>;
   return <section ref={observeIncidentHeader} className="workspace-shell" aria-label="Incident workspace">
     <IncidentHeader incident={workspace.incident} dataset_version={workspace.dataset_version} />
+    <button className="mobile-navigation-trigger" aria-haspopup="dialog" aria-expanded="false" aria-controls="mobile-workspace-navigation"
+      onClick={event => {
+        const dialog = event.currentTarget.closest(".workspace-shell")?.querySelector<HTMLDialogElement>(".navigation-drawer");
+        if (dialog && !dialog.open) {
+          dialog.showModal(); event.currentTarget.setAttribute("aria-expanded", "true");
+          dialog.querySelector<HTMLButtonElement>(".drawer-close")?.focus();
+        }
+      }}>Threads &amp; cases</button>
     <div className="workspace-layout">
       <aside className="workspace-rail" aria-label="Workspace navigation">
-        <p className="eyebrow rail-label">Investigation threads</p>
-        <nav aria-label="Investigation threads" className="thread-nav">
-          {workspace.threads.map(item => <button key={item.thread_kind}
-            aria-pressed={thread === item.thread_kind} onClick={() => onThread(item.thread_kind)}>
-            <span>{item.label}</span><span className="thread-count">{item.case_count}<span className="sr-only"> configured case{item.case_count === 1 ? "" : "s"}</span></span>
-          </button>)}
-        </nav>
-        <div className="rail-boundary">
-          <p className="eyebrow">Cases</p>
-          {caseNavigation ?? <p>No active case</p>}
-        </div>
-        <p className="rail-footnote">Read-only investigation<br />Synthetic demo environment</p>
+        {navigation}
       </aside>
       <div className="workspace-content" tabIndex={-1}>
         <div className="workspace-heading">
@@ -91,5 +143,15 @@ export default function WorkspaceShell({ workspace, thread, view, onThread, onVi
         </section>}
       </div>
     </div>
+    <dialog ref={observeNavigationDrawer} id="mobile-workspace-navigation" className="navigation-drawer" aria-labelledby="drawer-heading"
+      onKeyDown={containDrawerFocus} onClickCapture={event => {
+        // Close before the existing case callback focuses its heading, including
+        // selecting the current case again. Thread changes stay in the drawer.
+        if (event.target instanceof Element && event.target.closest(".case-nav button")) event.currentTarget.close();
+      }}>
+      <div className="drawer-heading"><h2 id="drawer-heading">Threads &amp; cases</h2>
+        <button className="drawer-close" onClick={event => event.currentTarget.closest("dialog")?.close()}>Close navigation</button></div>
+      {navigation}
+    </dialog>
   </section>;
 }

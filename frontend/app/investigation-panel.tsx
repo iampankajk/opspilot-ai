@@ -82,6 +82,7 @@ export default function InvestigationPanel() {
           }}>demo session</a>, then load a known incident. Your investigation is independent of other visitors.</p>
           <form onSubmit={event => {
             event.preventDefault();
+            if (busy) return;
             void run(signal => loadIncident(reference.trim(), signal), result => {
               setEntry(result); setWorkspace(null);
               const url = new URL(window.location.href); url.searchParams.delete("investigation");
@@ -90,17 +91,18 @@ export default function InvestigationPanel() {
           }}>
             <label htmlFor="incident-reference">Incident reference</label>
             <input id="incident-reference" value={reference} onChange={event => setReference(event.target.value)}
-              required maxLength={128} disabled={busy} />
-            <button type="submit" disabled={busy}>Load incident</button>
+              required maxLength={128} readOnly={busy} aria-describedby={error ? "investigation-error" : undefined} />
+            <button type="submit" aria-disabled={busy}>Load incident</button>
           </form>
           {entry && !workspace && <IncidentHeader {...entry} />}
-          {entry && !workspace && <button disabled={busy} onClick={() => {
+          {entry && !workspace && <button aria-disabled={busy} onClick={() => {
+            if (busy) return;
             void run(signal => createInvestigation(entry.incident.incident_id, signal), showWorkspace);
           }}>Create or resume investigation</button>}
         </div>
       </details>
       {busy && <p role="status">Loading workspace…</p>}
-      {error && <p role="alert" className="failure">{error}</p>}
+      {error && <p id="investigation-error" role="alert" className="failure">{error}</p>}
       {workspace && <>
         {validContext && <CaseWorkspace key={workspaceScope(workspace)} workspace={workspace}
           onVersion={version => { if (generation === contextGeneration.current) updateVersion(version); }}
@@ -109,7 +111,7 @@ export default function InvestigationPanel() {
           <summary>Workspace details</summary>
           <p className="request-id">Investigation: <code>{workspace.investigation_id}</code></p>
           <p className="request-id">State: <code>{workspace.state_id}</code> · Draft version {workspace.draft_version}</p>
-          <button disabled={busy} onClick={() => void run(signal => loadWorkspace(workspace.investigation_id, signal), showWorkspace, true)}>
+          <button aria-disabled={busy} onClick={() => { if (!busy) void run(signal => loadWorkspace(workspace.investigation_id, signal), showWorkspace, true); }}>
             Reload saved workspace
           </button>
         </details>

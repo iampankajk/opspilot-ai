@@ -28,13 +28,13 @@ export function EvidenceView({ result, retry, history, selectedCase, onInspect, 
     <div className="evidence-toolbar">
       <div><h4>Evidence inspection</h4>
         <p className="muted">Synthetic records only; no live source is queried. Reinspection reads the pinned evidence.</p></div>
-      <button disabled={result.status === "loading"} onClick={onInspect}>
+      <button aria-disabled={result.status === "loading"} onClick={() => { if (result.status !== "loading") onInspect(); }}>
         {result.status === "loading" ? "Retrieving evidence…" : result.status === "idle" ? "Inspect evidence" : retry || result.status === "failed" ? "Retry evidence" : "Inspect again"}
       </button>
     </div>
     {(thread ?? data?.thread_kind) === "possible_duplicates" && <p className="evidence-notice">Multiple payment attempts do not establish multiple customer charges. Independent financial evidence, including bank/settlement records, may still be missing.</p>}
     {result.status === "failed" && <p role="alert" className="failure">{result.message}</p>}
-    {data && <p role="status" className="retrieval-status">Retrieval {data.status === "completed" ? "completed" : "partial — some sources failed or were interrupted"}. Evidence completeness is reported separately for each source.</p>}
+    <p role="status" aria-atomic="true" className="retrieval-status">{result.status === "loading" ? "Retrieving case evidence. Source counts are unknown until the request finishes." : data ? `Retrieval ${data.status === "completed" ? "completed" : "partial — some sources failed or were interrupted"}. Evidence completeness is reported separately for each source.` : ""}</p>
     {evidenceGroups.map(group => {
       const sources = data?.groups.find(g => g.group_kind === group.kind)?.sources;
       const groupRecords = sources?.flatMap(s => s.records) ?? [];
@@ -54,7 +54,7 @@ export function EvidenceView({ result, retry, history, selectedCase, onInspect, 
           </div>;
         })}</div>
         {groupRecords.length > 0 && <details className="source-records" open>
-          <summary>Records ({groupRecords.length})</summary>
+          <summary><span className="sr-only">{group.label} · </span>Records ({groupRecords.length})</summary>
           {groupRecords.map(record => {
             const summary = recordSummary(record), time = summaryTimestamp(record);
             const related = data!.relationships.filter(link => link.from_record_id === record.evidence_record_id || link.to_record_id === record.evidence_record_id);
