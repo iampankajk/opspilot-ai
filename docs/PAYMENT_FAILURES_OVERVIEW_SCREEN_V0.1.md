@@ -1,6 +1,8 @@
 # OpsPilot AI — Payment Failures Overview Screen v0.1
 
-**Design status:** First-pass screen design complete; ready for product-owner walkthrough  
+> **Current scope — 16 November 2026:** D-030–D-034 approve the evidence-first redesign before Task 5B. This screen uses the compact header + desktop navigation rail + Overview/Evidence workspace. Assistant, search/filters, and active Findings are deferred. The [UX Blueprint](UX_BLUEPRINT_V0.1.md) governs shared behavior, implementation increments, measurable UX-R acceptance criteria, and the explicit conflict register. Original examples are illustrative; they do not add records, API fields, or implemented features. Approval is design evidence, not implementation or accessibility verification.
+
+**Design status:** First-pass design amended by approved evidence-first redesign; implementation pending\
 **Product phase:** Phase 2 — Screen-level UX Design  
 **Screen:** Investigation Workspace → Payment failures → Overview
 
@@ -11,23 +13,17 @@ This screen helps a Payments Operations Engineer understand the payment-failure 
 It has two levels of information:
 
 - **Incident-level context:** shared information about the incident, shown in the persistent Incident Overview header.
-- **Thread-level information:** payment-failure metrics and individual payment/customer cases, shown in this screen.
+- **Thread-level information:** configured-case count and individual payment/customer cases. Aggregate metrics remain future-only (§4.2).
 
 The screen does not determine root cause, resolve payments, or perform operational actions. It helps the engineer move from an incident-level pattern to a specific case and its supporting evidence.
 
 ## 2. Workspace placement
 
-The screen sits inside the agreed three-part investigation workspace:
-
-- **Left:** Investigation Threads — Payment failures (selected) and Possible duplicates.
-- **Center:** Main workspace — Overview, Evidence and Findings tabs.
-- **Right:** OpsPilot AI Assistant — remains available while the engineer moves between the tabs.
-
-The shared Incident Overview header remains visible above the workspace.
+Use the compact incident header, persistent thread/case navigation rail, and main workspace in the amended Blueprint. Overview and Evidence are active; Findings is labelled unavailable and cannot invoke findings APIs. No assistant panel or reserved right column. Fresh entry defaults to Payment failures → Overview with no selected case. Case selection is explicit.
 
 ## 3. Shared Incident Overview header
 
-The header is shared across both investigation threads and all three center tabs. It contains:
+The header is shared across both investigation threads and the active Overview/Evidence views. Findings is visibly unavailable. Show supplied values and explicit missing states rather than copying illustrative content. It contains:
 
 - Incident ID.
 - Incident category.
@@ -56,11 +52,11 @@ At the top of the center content, show:
 
 - The selected thread name: **Payment failures**.
 - A brief explanatory line, such as: “Review the payment-failure pattern and the individual cases associated with this incident.”
-- The three agreed workspace tabs: **Overview**, **Evidence**, and **Findings**, with Overview selected.
+- **Overview** and **Evidence** navigation, with Overview selected; **Findings — unavailable** is a clearly labelled inactive destination.
 
-### 4.2 Investigation summary metrics
+### 4.2 Investigation summary metrics — future data-backed capability
 
-Show a compact metric area above the case list. Use only metrics supported by the approved synthetic evidence package.
+For the current redesign, omit aggregate metric cards: the implemented workspace/case APIs do not expose their required basis. Show the configured-case count instead. The definitions and examples below are retained for a later data-backed capability; do not hardcode them or calculate incident-wide rates from the case list.
 
 For the current example incident:
 
@@ -85,7 +81,7 @@ Metric rules:
 
 ### 4.3 Individual payment case list
 
-Place the heading **Individual payment cases** below the metrics.
+Place **Individual payment cases** below the thread explanation and configured-case count; aggregate cards are absent in this increment.
 
 Each row contains five agreed pieces of information:
 
@@ -107,7 +103,7 @@ The payment reference can be shown in Evidence when the engineer opens the case;
 
 **Payment status** describes what the available payment records establish about the payment. Display the source-supported state. Examples may include Failed, Pending, Succeeded or Outcome unknown. Do not label a payment Failed merely because an application recorded a timeout; a timeout may leave the provider outcome unknown.
 
-**Investigation progress** describes the engineer's review of the case in the current saved revision:
+**Current redesign:** the implemented case contract returns **Not started**. Opening a case, retrieving evidence, or generating a future proposal does not record human review. The following derivation applies when claim-level review is separately implemented in the working state or a saved revision:
 
 - **Not started:** No finding linked to this case has received a human review decision yet, or there are no linked findings to review.
 - **In progress:** At least one linked finding has a human review decision, but one or more linked findings still await review.
@@ -117,22 +113,9 @@ A human review decision can accept or correct an AI-proposed status. “Reviewed
 
 The progress indicator should be derived from claim-level human review records, not from payment status and not from whether the user merely opened the case.
 
-### 4.4 Search and filters
+### 4.4 Search and filters — deferred
 
-To help an engineer find a case without turning this screen into a case-management system, include a small control row above the list:
-
-- Search by case reference or customer reference.
-- Filter by Payment status.
-- Filter by Investigation progress.
-
-Defaults:
-
-- Search is empty.
-- Both filters are set to **All**.
-- No cases are hidden by default.
-- Provide a **Clear filters** action when any search or filter is active.
-
-For the synthetic MVP, show the full matching list without pagination. Keep the control set small; advanced query builders, bulk selection and saved filters are out of scope.
+D-030 defers search and filters for the current dataset. Show every returned case without pagination or sorting controls; no filter toolbar, filter-empty state, or Clear filters action. Larger-list search/filter requirements may be revisited in a separately scoped increment.
 
 ### 4.5 Case row interaction
 
@@ -142,73 +125,52 @@ When the engineer selects a case:
 
 1. Open the **Evidence** tab.
 2. Set the selected case as the active case.
-3. Focus the Evidence content on records related to that case.
+3. Focus the selected-case context. If no local response exists for this scope, show Not requested/count unknown and an explicit Inspect evidence action; selection sends no evidence POST.
 4. Keep all four source sections visible: Internal Payment Records, Stripe / Payment Provider, Logs & Traces, and Support Tickets.
 5. Preserve a visible case reference so the engineer can tell which case is selected.
 
-The right-side AI Assistant remains open and retains the Payment failures thread context. The selected case becomes the current focus within that thread; it does not authorize the assistant to silently mix in Possible duplicates evidence.
+Keep the Payment failures thread and selected case identifiable. Do not mix another thread's evidence or local state; the assistant is deferred.
 
-When the engineer returns to Overview, preserve the prior search/filter state and their place in the case list during the current workspace session.
+When the engineer returns to Overview, preserve their place and local case selection. Thread switching restores that thread's prior view/case and valid evidence UI state within the current loaded page, as defined in Blueprint §5; full reload retains only the existing backend resume contract.
 
 Keyboard users must be able to focus and activate each row. Use a visible focus style and do not rely on color alone to communicate that a row is clickable.
 
-## 5. Suggested desktop wireframe
-
-This is a structural wireframe, not a final visual design or pixel specification.
+## 5. Approved desktop structure
 
 ```text
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ INC-2026-1042                                      [SYNTHETIC DATA]           │
-│ Payment Processing · SEV-2 · APAC                                            │
-│ 20 Oct 2026 · 10:30 AM SGT (UTC+08:00)                                       │
-│ Elevated payment failures and reports of possible duplicate charges across APAC.│
-├────────────────┬───────────────────────────────────────────┬─────────────────┤
-│ INVESTIGATION  │ Payment failures                           │ OPSPILOT AI     │
-│ THREADS        │ Review the failure pattern and cases.      │                 │
-│                │                                             │ Assistant       │
-│ > Payment      │ [Overview] [Evidence] [Findings]            │ remains         │
-│   failures     │                                             │ available       │
-│                │ ┌──────────────────┐ ┌───────────────────┐  │                 │
-│   Possible     │ │ 12.4%            │ │ 62 of 500         │  │                 │
-│   duplicates   │ │ Failure rate     │ │ Failed attempts   │  │                 │
-│                │ └──────────────────┘ └───────────────────┘  │                 │
-│                │ Measurement window: 10:25–10:30 AM SGT      │                 │
-│                │                                             │                 │
-│                │ Individual payment cases                    │                 │
-│                │ [Search case/customer] [Payment status ▾]   │                 │
-│                │ [Investigation progress ▾] [Clear filters]  │                 │
-│                │                                             │                 │
-│                │ CASE-001 · CUST-104 | SGD 48.00 | Outcome   │                 │
-│                │ Reported issue: Customer reports failure   │                 │
-│                │                          | Not started       │                 │
-│                │─────────────────────────────────────────────│                 │
-│                │ CASE-002 · CUST-108 | SGD 75.00 | Failed    │                 │
-│                │ Reported issue: Payment did not complete   │                 │
-│                │                          | In progress       │                 │
-└────────────────┴───────────────────────────────────────────┴─────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│ Incident ID / title · severity · region · time   Synthetic data │
+│ Supplied description · pinned dataset               Session    │
+├─────────────────┬──────────────────────────────────────────────┤
+│ THREADS         │ Payment failures                             │
+│ Payment failures│ [Overview] [Evidence] Findings — unavailable  │
+│ Possible        │ Configured cases: value from workspace       │
+│ duplicates      │                                              │
+│ CASES           │ Case/customer | reported amount | payment    │
+│ No active case  │ context | review progress                    │
+│ until selection │ Select a case → Evidence (no automatic POST) │
+└─────────────────┴──────────────────────────────────────────────┘
 ```
+
+Information architecture only. Use professional dashboard typography, consistent spacing, subtle borders, and compact rows; no source-less metrics or extra sample cases.
 
 ## 6. Empty, loading and error states
 
 ### No cases in the available synthetic dataset
 
-Keep the metric area visible if its metrics are supported. In the case-list area show:
+Show the configured-case count and, in the case-list area:
 
 > No matching payment cases were found in the available synthetic dataset for this investigation.
 
 Do not imply that no real customers or payments were affected outside the dataset.
 
-### No search/filter results
+### No search/filter results — not applicable
 
-Show:
-
-> No cases match your search or selected filters.
-
-Provide **Clear filters** so the engineer can restore the full list.
+Search/filters are deferred; no such state is implemented in this increment.
 
 ### Loading
 
-Keep the workspace structure in place and show a restrained loading state in the metrics and case-list areas. Avoid replacing the whole workspace with a blank screen.
+Keep the workspace structure in place and show a restrained case-list loading state, without transient zero counts. Avoid replacing the whole workspace with a blank screen.
 
 ### Error loading the thread data
 
@@ -216,18 +178,18 @@ Show:
 
 > We couldn't load the payment-failure investigation data. Try again.
 
-Provide a Retry action. Do not show stale metrics as though they are current unless they are explicitly identified as previously loaded data.
+Provide explicit Retry. Do not replace a retrieval error with an empty-case message or display stale cases under another scope.
 
 ## 7. Responsive and accessibility behaviour
 
 The MVP is desktop-first because the primary persona is an operations engineer working through several evidence sources.
 
-- On wide screens, use the agreed three-column workspace.
-- At narrower widths, the thread navigation and AI Assistant may collapse into accessible panels so the center workspace remains usable.
+- On wide screens, use the compact header, persistent navigation rail, and main content workspace.
+- At narrower widths, thread/case navigation becomes an accessible drawer; the assistant is absent.
 - Keep the Incident Overview information readable when it wraps; do not hide the Synthetic Data indicator.
 - On small screens, render each case as a stacked card while preserving the same five fields and full-row interaction.
 - Use text labels in addition to status colors.
-- Support keyboard navigation, visible focus, and accessible names for search, filters and row actions.
+- Support keyboard navigation, visible unobscured focus, and accessible row-action names. Meet the Blueprint responsive/WCAG 2.2 AA verification targets.
 
 Exact widths, colors, typography and animation are intentionally not specified at this stage.
 
@@ -246,28 +208,15 @@ Do not add the following to the MVP Overview screen:
 ## 9. Relationship to the other workspace areas
 
 - **Incident Overview header:** shared incident metadata and the one-line incident description.
-- **Overview tab:** thread-level metrics and a list of individual cases.
+- **Overview tab:** configured-case count and compact full case list; aggregate metrics await a later supported data contract.
 - **Evidence tab:** source records and traceable relationships for the selected case.
-- **Findings tab:** individual claims, AI-proposed statuses and human review decisions.
-- **AI Assistant:** persistent, thread-aware conversational support.
+- **Findings:** clearly unavailable in this increment; later claims/review remain separate requirements.
+- **AI Assistant:** deferred; no panel or conversation controls.
 
 The Payment failures Overview should not duplicate detailed evidence or claim review controls. Its main job is to help the engineer understand the pattern and choose which case to inspect next.
 
-## 10. Design completion checklist
+## 10. Current acceptance and future requirements
 
-- [x] Shared incident header and Synthetic Data indicator.
-- [x] Incident time shown with relevant timezone and UTC offset.
-- [x] One-line incident description.
-- [x] Payment failures thread heading and Overview/Evidence/Findings navigation.
-- [x] Compact, source-backed summary metrics with numerator, denominator and time window.
-- [x] Individual case list with the five agreed fields.
-- [x] Payment status separated from investigation progress.
-- [x] Progress derived from human review decisions and scoped to the current revision.
-- [x] Search and basic filters with simple defaults.
-- [x] Full-row selection opens Evidence with the case selected.
-- [x] Assistant remains available with selected-thread context.
-- [x] Empty, no-results, loading and error states.
-- [x] Desktop-first responsive and accessibility behaviour.
-- [x] Explicit MVP exclusions to prevent scope creep.
+Use Blueprint UX-R01–R08, R15, and R17–R21. The earlier checked first-pass checklist is superseded as current scope; it was design coverage, not passing implementation checks. Aggregate metrics, search/filters, active Findings/review and assistant behavior remain deferred. Source-safe case selection and full keyboard access remain required.
 
 **Design principle:** The Payment failures Overview gives the engineer a truthful summary of the incident pattern and a clear route into each individual case. It must never confuse a payment outcome with investigation progress or present incomplete evidence as a conclusion.

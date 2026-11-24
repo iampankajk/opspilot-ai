@@ -1,11 +1,19 @@
 # OpsPilot AI — Payment Failures → Findings Screen v0.1
 
-**Status:** First-pass UX design complete; pending product-owner review  
+> **Current scope — 16 November 2026:** D-030–D-034 approve the evidence-first redesign before Task 5B. **This entire Findings screen is a retained future-product design, not current redesign scope.** Show only Findings — unavailable; make zero findings read/generation calls and provide no Accept/Correct, review filters, assistant, Save/Refresh/Export, or historical-revision controls. Task 5B and later human review require separate authorization. The [UX Blueprint](UX_BLUEPRINT_V0.1.md) governs shared behavior, implementation increments, measurable UX-R acceptance criteria, and the explicit conflict register. Original examples are illustrative; they do not add records, API fields, or implemented features. Approval is design evidence, not implementation or accessibility verification.
+
+**Status:** Retained first-pass full-product design; frontend findings and human review deferred
 **Phase:** Phase 2 — Screen-level UX Design  
 **Parent UX blueprint:** `docs/UX_BLUEPRINT_V0.1.md`  
 **Related screens:** `docs/PAYMENT_FAILURES_OVERVIEW_SCREEN_V0.1.md`, `docs/PAYMENT_FAILURES_EVIDENCE_SCREEN_V0.1.md`
 
 ---
+
+## Current redesign boundary and later contract reconciliation
+
+The amended Blueprint and D-030–D-034 supersede persistent assistant/current Findings availability clauses below for this increment. All claim cards, review filters, review/save/export states, journey steps, and completion checklists below are future design requirements, not proof of implementation or instructions to add these capabilities during the redesign. No unavailable feature should appear as an empty generated result or a pending human review task.
+
+Task 5A supports backend/mock, request-bound unreviewed proposals for exactly one case/thread/state per generation, not the complete multi-case/review/revision experience described below. A later Task 5B must honor that narrower contract and explicit generation semantics; it must not invent human decisions or reassessment. Original claim-status, citation, payment-lifecycle, uncertainty, and individual-review safeguards remain valid. D-010 requires a nonblank correction rationale in **both** threads when human review is implemented. Review progress derives from recorded claim decisions, never merely opening/inspecting evidence. Assistant context rules remain future requirements; the current interface has no assistant panel.
 
 ## 1. Purpose of this screen
 
@@ -153,7 +161,7 @@ When the engineer chooses Correct status:
 
 - Present the same three permitted statuses: Confirmed, Not confirmed and Inconclusive.
 - Make the available choices clear and mutually exclusive.
-- Allow an optional reviewer note explaining the correction.
+- Require a short nonblank rationale explaining the correction in both threads (D-010 supersedes the earlier optional-note wording).
 - Show a final review action before recording the decision if the interaction is more than a single direct selection.
 - Preserve both the original AI proposal and the human-selected status.
 

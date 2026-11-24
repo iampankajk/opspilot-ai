@@ -55,12 +55,29 @@ export default function Home() {
   }, [attempt]);
 
   return (
-    <main>
-      <p className="eyebrow">OpsPilot AI · Local development</p>
-      <h1>Application foundation</h1>
-      <p>Check the connection between the interface, API, and database.</p>
-      <section aria-labelledby="connection-heading">
-        <h2 id="connection-heading">Connection status</h2>
+    <main id="main-content">
+      <a className="skip-link" href="#investigate-heading" onClick={() => {
+        document.getElementById("investigate-heading")?.focus();
+      }}>Skip to investigation</a>
+      <header className="app-bar">
+        <a className="brand" href="/" aria-label="OpsPilot AI home"><span className="brand-mark" aria-hidden="true">O</span>OpsPilot <span>AI</span></a>
+        <p className="app-caption">Incident investigation workspace</p>
+        <details id="demo-session" className="session-disclosure">
+          <summary>Demo session</summary>
+          <VisitorSessionPanel onNewSession={() => {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("investigation");
+            window.history.replaceState(null, "", url);
+            setVisitorEpoch(value => value + 1);
+          }} />
+        </details>
+      </header>
+      <InvestigationPanel key={visitorEpoch} />
+      {connection.status === "failed" && <p role="alert" className="failure connection-notice">
+        Connection unavailable. {connection.message} Check connection diagnostics below and retry.
+      </p>}
+      <details className="connection-disclosure">
+        <summary>Connection diagnostics</summary>
         <div role="status" aria-live="polite">
           {connection.status === "checking" && <p>Checking backend and database…</p>}
           {connection.status === "connected" && <>
@@ -78,14 +95,7 @@ export default function Home() {
         <button disabled={connection.status === "checking"} onClick={() => setAttempt(n => n + 1)}>
           Check again
         </button>
-      </section>
-      <VisitorSessionPanel onNewSession={() => {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("investigation");
-        window.history.replaceState(null, "", url);
-        setVisitorEpoch(value => value + 1);
-      }} />
-      <InvestigationPanel key={visitorEpoch} />
+      </details>
     </main>
   );
 }

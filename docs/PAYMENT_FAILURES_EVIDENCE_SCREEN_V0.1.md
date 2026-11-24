@@ -1,7 +1,9 @@
 # OpsPilot AI — Payment Failures: Evidence Screen v0.1
 
+> **Current scope — 16 November 2026:** D-030–D-034 approve the evidence-first redesign before Task 5B. Case selection navigates only; evidence retrieval/reinspection/retry is explicit. The assistant and search/filters are deferred; Findings is unavailable. Local UI preservation adds no backend contract. The [UX Blueprint](UX_BLUEPRINT_V0.1.md) governs shared behavior, implementation increments, measurable UX-R acceptance criteria, and the explicit conflict register. Original examples are illustrative; they do not add records, API fields, or implemented features. Approval is design evidence, not implementation or accessibility verification.
+
 **Phase:** Phase 2 — Screen-level UX Design  
-**Status:** First-pass screen specification — ready for product-owner review  
+**Status:** First-pass design amended by approved evidence-first redesign; implementation pending
 **Related documents:** `PRD_V0.1.md`, `docs/UX_BLUEPRINT_V0.1.md`, `docs/PAYMENT_FAILURES_OVERVIEW_SCREEN_V0.1.md`
 
 ---
@@ -17,6 +19,15 @@ It should make three things easy to understand:
 3. Why does OpsPilot associate that record with the selected payment case?
 
 The screen presents evidence; it does not decide the root cause or declare a duplicate charge. Interpretation and claim review happen in Findings.
+
+
+### Current operation and presentation contract
+
+Use Blueprint §§3–6 and UX-R05–R21. Selecting a case or returning to Evidence does not POST. Without an active case, offer Select a case; without a response, show Not requested/count unknown in all groups. Inspect evidence, Inspect again, and eligible Retry are explicit whole-case operations using existing state/version/retry rules. All six source outcomes arrive in one terminal response; no per-source streaming/retry API is introduced. Preserve source execution, availability, match result, and completeness independently. Completed retrieval does not establish complete coverage. Failed/interrupted/not-evaluated counts are unknown, never zero.
+
+Readable compact rows and inline fields come before exact raw payload/technical disclosures. Keep record IDs, original timestamps/timezones/precision/missing reasons, synthetic provenance, matched fields, relationship category/basis/attribution, and limitations available. Material limitations stay visible beside affected evidence; consolidate repeated generic descriptions. Keep multiple records open. Relationship navigation reveals/focuses its target without another request or closing other records. Compact incident/case context remains visible on desktop without independent sticky source/record/toolbars. Mobile uses the thread/case drawer, not an assistant drawer. Current review progress stays Not started; no findings/review calls or controls.
+
+Session-local state restores per scoped investigation/state/thread/case while the page remains loaded. Full reload uses existing workspace resume and defaults to Payment failures → Overview/no case; it does not restore prior evidence responses or expose full durable request history. Workspace GET/reinspection are not numbered revisions or dataset refresh.
 
 ## 2. Entry point and navigation
 
@@ -36,13 +47,13 @@ The screen remains inside the agreed investigation workspace:
 - Shared Incident Overview stays at the top.
 - Investigation Threads remain in the left sidebar.
 - Evidence content occupies the center workspace.
-- The OpsPilot AI Assistant remains available in the right panel.
+- No assistant panel; use the main width for evidence. Findings remains unavailable.
 
 ## 3. Shared incident and thread context
 
 The shared incident header follows the approved UX Blueprint. It displays the incident identity and metadata, one-line description when available, relevant incident timezone, and a persistent **Synthetic Data** indicator for this MVP.
 
-The active investigation thread is **Payment failures**. Switching to another thread changes the assistant's working context and the central investigation content, while shared incident context remains available.
+The active investigation thread is **Payment failures**. Switching threads changes central content and restores that thread's valid local case/evidence context; shared incident context remains available.
 
 ## 4. Selected payment case context
 
@@ -231,24 +242,13 @@ Selecting a cross-reference should:
 
 Only provide cross-references supported by explicit identifiers or documented relationships in the dataset. Do not create a relationship just because two records have similar-looking values.
 
-## 11. Search and filtering
+## 11. Search and filtering — deferred
 
-Keep search and filtering lightweight in v0.1. The selected case is already the main scope.
+D-030 defers evidence search and filters for the current dataset. Keep all four source headings visible. Source and record expand/collapse remains local navigation, not a search/filter or a new retrieval operation. No query builders, arbitrary date analytics, user-defined joins, or cross-incident search.
 
-Recommended controls:
+## 12. OpsPilot AI Assistant behaviour — future requirement only
 
-- A search field for matching text/identifiers within the selected case's available evidence.
-- Optional source-section collapse/expand controls.
-
-Search should match available record identifiers, key text and relevant field values. It should not change the underlying evidence or create new links.
-
-If no records match the search, show a clear message and provide a way to clear the search. Keep all four source section headings visible so the engineer retains awareness of the evidence sources.
-
-Do not add advanced query builders, user-defined joins, arbitrary date-range analytics or broad incident-wide search to this MVP screen.
-
-## 12. OpsPilot AI Assistant behaviour
-
-The AI Assistant remains visible in the persistent right-side panel while the engineer uses Evidence.
+The assistant is deferred from this redesign: no right panel, chat control, or assistant call. The following requirements apply only if an assistant feature is separately authorized.
 
 Its working context includes:
 
@@ -278,9 +278,9 @@ The screen should handle each of the following distinctly:
 
 Keep the selected-case context visible where possible and show loading placeholders inside the source sections that are still being retrieved.
 
-### Some sources loaded, others still loading
+### Source outcomes in the terminal response
 
-Show each source's own state independently. Do not block already available evidence while waiting for another source.
+The current synchronous endpoint returns all six outcomes together. During the request show loading, not invented source progress. After a partial result, show successful records and individual failed/interrupted outcomes together; do not block the successful evidence. Per-source streamed arrival is not implemented or required.
 
 ### No matching records in a source
 
@@ -296,12 +296,12 @@ Identify the affected source and show that its records could not be loaded. Offe
 
 ### Invalid/stale selected case reference
 
-Explain that the selected case could not be found in the current investigation revision and provide a route back to the case list. Do not silently switch to another case.
+Explain that the selected case could not be found in the current investigation state and provide a route back to the case list. Follow existing stale-state/version recovery; do not silently switch to another case or imply numbered revision support.
 
 ## 14. Navigation and state preservation
 
 - The selected case remains active while the engineer moves between evidence source sections and expands/collapses records.
-- Moving to Findings and back to Evidence should preserve the selected case when the same investigation revision is active.
+- Moving between Overview and Evidence preserves valid local case/UI state; Findings is unavailable. Future Findings return navigation remains a later requirement.
 - Switching to another case updates the case context and evidence scope.
 - Switching investigation threads changes the active thread and its case/evidence context.
 - Changing the selected case must not be presented as a new saved revision by itself.
@@ -312,7 +312,7 @@ Explain that the selected case could not be found in the current investigation r
 - Expand/collapse controls must expose their state to assistive technology.
 - Do not rely on colour alone to communicate payment status, investigation progress, source state or record selection.
 - Provide visible focus states for interactive records and cross-references.
-- On narrower screens, the persistent AI Assistant may become a collapsible panel, while the Evidence content retains priority. The four source sections and selected-case context must remain accessible.
+- At narrower widths use an accessible thread/case drawer, preserve all four source headings and case context, and keep material limitations readable. The assistant is absent. Apply the Blueprint responsive/WCAG 2.2 AA checks.
 - Avoid making the entire record detail available only through hover.
 
 ## 16. Out of scope for this screen
@@ -340,18 +340,18 @@ The Evidence screen does not:
 | Empty vs error | Distinguish no matching records from a retrieval failure |
 | Timestamp display | Preserve source time/timezone; show timezone when known |
 | In-section ordering | Oldest-to-newest for timestamped event records |
-| AI Assistant | Remains available and follows the selected thread and case |
-| Mutating actions | None; this is a read-only evidence inspection experience |
+| AI Assistant / Findings | Assistant deferred; Findings visibly unavailable |
+| Mutating actions | No source-system/payment mutations; explicit requests retain internal investigation history under existing contracts |
 
 ## 18. Open for later design review
 
 The following details can be refined after the first-pass screen review and before implementation:
 
 - Exact visual density and spacing of record summaries.
-- Whether the search field is needed for the small initial synthetic dataset or should be deferred.
+- Search/filter deferral is resolved by D-030; no control is required now.
 - Exact source-specific fields once the final synthetic record schemas are implemented.
-- Whether the compact selected-case summary stays sticky while scrolling.
-- Exact responsive behaviour of the AI Assistant panel.
+- Compact incident/case context stays visible on desktop; exact coordinated sticky-region geometry is refined against Blueprint acceptance criteria.
+- Assistant responsive behavior remains future only; current mobile navigation uses the thread/case drawer.
 
 These open details do not change the agreed high-level structure or the evidence-safety rules above.
 
