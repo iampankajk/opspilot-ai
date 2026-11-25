@@ -1,37 +1,45 @@
-"""Offline adapter only. The protocol can later be implemented by an async OpenAI adapter."""
+"""Findings adapter contract and the deterministic offline implementation."""
 
 import json
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
+from app.findings_schemas import ProviderName
 from app.findings_validation import returned_records
+
+TokenCountKind = Literal["mock_estimate", "openai_input_tokens"]
+ProviderStatus = Literal["completed", "refused", "incomplete", "invalid", "failed", "configuration"]
 
 
 @dataclass(frozen=True)
 class InputCount:
     input_tokens: int
-    kind: str
+    kind: TokenCountKind
 
 
 @dataclass(frozen=True)
 class ProviderResult:
     output_json: str
-    status: Literal["completed", "refused", "incomplete"] = "completed"
-    model: str = "mock-findings-v1"
+    status: ProviderStatus = "completed"
+    model: str | None = "mock-findings-v1"
     response_id: str | None = None
-    usage: dict | None = None
+    usage: dict[str, int] | None = None
+    standard_tier: bool = False
 
 
 class ProviderFailure(Exception):
     """Adapters translate provider exceptions to one of these safe categories."""
 
-    def __init__(self, kind: Literal["configuration", "rate_limit", "unavailable"]):
+    def __init__(
+        self, kind: Literal["configuration", "rate_limit", "connection", "unavailable", "invalid"]
+    ):
         super().__init__(kind)
         self.kind = kind
 
 
 class FindingsProvider(Protocol):
-    name: str
+    @property
+    def name(self) -> ProviderName: ...
 
     async def count_input(self, bundle: dict, *, timeout: float) -> InputCount: ...
 
@@ -82,7 +90,7 @@ def finding(
 class MockFindingsProvider:
     """Fixed synthetic-scenario examples, not AI reasoning or a financial inference engine."""
 
-    name = "mock"
+    name: ProviderName = "mock"
 
     async def count_input(self, bundle: dict, *, timeout: float) -> InputCount:
         # Deterministic test units only; this is deliberately NOT an OpenAI token counter.

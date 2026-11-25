@@ -79,9 +79,15 @@ Recorded 16 November 2026 from the owner's explicit approval of the UX assessmen
 
 Validation plan: the Blueprint's UX-R criteria cover the five views, both seeded cases, scoped local state, network side effects, source semantics, keyboard use, responsive layouts, and visual density. Criteria describe future required evidence, not tests already run. Historical screen clauses explicitly marked future do not require deferred capabilities in this increment.
 
+## Approved Task 5B backend integration
+
+| ID | Date | Decision | Context / alternatives | Consequences | Status |
+|---|---|---|---|---|---|
+| D-035 | 2026-11-24 | Implement the OpenAI Responses adapter with `openai==3.58.0`, configurable default `gpt-6-luna`, and offline verification. | The owner approved the pin subject to lock compatibility and retained D-024–D-029's findings workflow and limits. | Use explicit server-side selection, retain the deterministic mock, count input before one bounded generation, and derive strict provider JSON Schema from Pydantic. Require independent Pydantic and reference validation before atomic publication. Reuse the six findings tables and allowlisted history. A live smoke test needs separate authorization. | Accepted |
+
 ## Historical review label crosswalk
 
-Former D1–D13 labels were local to the design review, not alternatives to existing D-001–D-013. For example, review D12 resolves D-004; it is not canonical D-012. These aliases remain here for traceability only. Use canonical IDs in future documentation; the next unused canonical ID is D-035.
+Former D1–D13 labels were local to the design review, not alternatives to existing D-001–D-013. For example, review D12 resolves D-004; it is not canonical D-012. These aliases remain here for traceability only. Use canonical IDs in future documentation. The next unused canonical ID is D-036.
 
 | Former review label | Canonical decision ID | Topic |
 |---|---|---|
@@ -102,7 +108,7 @@ Former D1–D13 labels were local to the design review, not alternatives to exis
 ## Remaining choices outside this first-slice contract
 
 - Later finding/version/current-pointer and frozen-revision guards, general retention/deletion policy, and features deferred by D-022.
-- Hosting provider, later vector storage/extension, MCP integration, evaluation tooling, and cache infrastructure. D-024 selects OpenAI Responses, D-027 selects the Python workflow, and D-029 accepts the concrete model/defaults/API/output/persistence contract. Actual OpenAI adapter/package integration and live quality/latency evaluation remain later increments. No durable queue or microservices are part of the initial approved scope.
+- Hosting provider, later vector storage/extension, MCP integration, evaluation tooling, and cache infrastructure. D-024 selects OpenAI Responses, D-027 selects the Python workflow, D-029 accepts the concrete findings contract, and D-035 approves offline implementation and verification of the OpenAI adapter. Project access, a live smoke test, and live quality/latency evaluation remain separate work.
 - Concrete supported package/driver versions and local TLS/PostgreSQL connection configuration are implementation setup tasks. They do not reopen approved SQLAlchemy/Alembic/session/slice choices.
 
 The approved PRD/UX remain the requirements baseline. Screen-level consistency questions, the unvalidated original problem hypothesis, and fictional-company retention/exercise assumptions are not converted into implementation or real-world validation claims.

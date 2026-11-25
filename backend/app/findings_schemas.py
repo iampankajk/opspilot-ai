@@ -13,6 +13,8 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from pydantic.json_schema import GenerateJsonSchema
+from pydantic_core import core_schema
 
 from app.evidence_schemas import EvidenceRecordView, EvidenceRelationshipView, SourceOutcome
 from app.workspace_schemas import LocalID, Schema, ThreadKind
@@ -20,9 +22,24 @@ from app.workspace_schemas import LocalID, Schema, ThreadKind
 QuerySource = Literal["internal_payments", "stripe", "loki", "tempo", "zendesk", "support_lookup"]
 ProposalStatus = Literal["confirmed", "not_confirmed", "inconclusive"]
 GenerationStatus = Literal["pending", "completed", "failed", "interrupted", "stale"]
-ShortText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=240)]
+ProviderName = Literal["mock", "openai"]
+
+
+def storable_text(value: str) -> str:
+    if "\x00" in value:
+        raise ValueError("Text contains a null character")
+    return value
+
+
+ShortText = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=240),
+    AfterValidator(storable_text),
+]
 StatementText = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=400)
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=400),
+    AfterValidator(storable_text),
 ]
 CitationIndex = Annotated[int, Field(ge=0, lt=8)]
 
@@ -86,6 +103,15 @@ class FindingGenerationOutput(OutputSchema):
         if (not self.findings) != (self.no_findings_reason is not None):
             raise ValueError("Empty findings require exactly one reason")
         return self
+
+
+class FindingsProviderJsonSchema(GenerateJsonSchema):
+    def str_schema(self, schema: core_schema.StringSchema):
+        result = super().str_schema(schema)
+        # Keep length constraints in Pydantic, independent of OpenAI's schema subset.
+        result.pop("minLength", None)
+        result.pop("maxLength", None)
+        return result
 
 
 class FindingGenerationCreate(Schema):
@@ -168,7 +194,7 @@ class GenerationHistory(Schema):
     finished_at: SystemTime | None
     failure_code: str | None
     retryable: bool
-    provider: Literal["mock"]
+    provider: ProviderName
     configured_model: str
     returned_model: str | None
     prompt_version: str

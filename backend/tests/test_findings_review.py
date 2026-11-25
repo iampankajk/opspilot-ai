@@ -6,7 +6,7 @@ from datetime import timedelta
 from math import inf, nan, nextafter
 from threading import Event, get_ident, local
 
-import httpx
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -133,8 +133,8 @@ def test_database_phase_wait_does_not_block_unrelated_request_on_same_event_loop
 
     async def same_loop_requests():
         loop_thread = get_ident()
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(
+        transport = httpx2.ASGITransport(app=app)
+        async with httpx2.AsyncClient(
             transport=transport, base_url="https://localhost:3000", cookies=client.cookies
         ) as browser:
             generation = asyncio.create_task(

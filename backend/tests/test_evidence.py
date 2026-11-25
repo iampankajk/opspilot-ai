@@ -705,7 +705,10 @@ def test_history_and_evidence_survive_real_https_process_restart(database):
     with socket.socket() as reservation:
         reservation.bind(("127.0.0.1", 0))
         port = reservation.getsockname()[1]
-    environment = os.environ | {"DATABASE_URL": settings.database_url.get_secret_value()}
+    environment = os.environ | {
+        "DATABASE_URL": settings.database_url.get_secret_value(),
+        "AI_FINDINGS_ENABLED": "false",
+    }
     args = [
         sys.executable,
         "-m",

@@ -4,7 +4,7 @@ import asyncio
 import json
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from time import monotonic
 from typing import Annotated
@@ -32,6 +32,7 @@ from app.findings_schemas import (
     CaseFindings,
     FindingGenerationCreate,
     FindingGenerationOutput,
+    FindingsProviderJsonSchema,
     FindingsQuery,
     GenerationHistory,
     StoredCitation,
@@ -71,7 +72,7 @@ INSTRUCTIONS = (
     "evidence. Propose evidence questions only; no actions, tools, URLs or human decisions. "
     "Return only the required structured schema."
 )
-# Reviewed Standard rates, 2026-11-15. Admission estimates are not billing caps.
+# Reviewed Standard rates, 2026-11-24. Admission estimates are not billing caps.
 PRICES = {"gpt-6-luna": (Decimal("0.10"), Decimal("0.50"))}
 
 
@@ -95,6 +96,7 @@ class Attempt:
     version: int
     bundle: dict
     budget: dict
+    deadline_at: datetime
     end: float
 
 
@@ -113,30 +115,31 @@ def configured_provider(request):
     if not settings.ai_findings_enabled:
         raise GenerationFailure("AI_NOT_CONFIGURED", retryable=False)
     if (
-        settings.ai_findings_provider != "mock"
-        or provider is None
-        or provider.name != "mock"
+        provider is None
+        or provider.name != settings.ai_findings_provider
         or settings.ai_findings_model not in PRICES
     ):
-        # Task 5A intentionally cannot instantiate any network-backed provider, even with a key.
         raise GenerationFailure("AI_CONFIGURATION_ERROR", retryable=False)
     return provider
 
 
 def budget_view(settings):
     input_price, output_price = PRICES[settings.ai_findings_model]
+    is_openai = settings.ai_findings_provider == "openai"
     return {
         "max_input_tokens": settings.ai_findings_max_input_tokens,
         "max_output_tokens": settings.ai_findings_max_output_tokens,
         "max_attempt_usd": str(settings.ai_findings_max_attempt_usd),
         "input_price_per_million": str(input_price),
         "output_price_per_million": str(output_price),
-        "price_verified_at": "2026-11-15",
-        "provider": "mock",
+        "price_verified_at": "2026-11-24",
+        "provider": settings.ai_findings_provider,
         "model_timeout": settings.ai_findings_model_timeout_seconds,
         "count_timeout": settings.ai_findings_count_timeout_seconds,
-        "token_count_kind": "mock_estimate",
-        "cost_basis": "hypothetical_openai_admission_only",
+        "token_count_kind": "openai_input_tokens" if is_openai else "mock_estimate",
+        "cost_basis": "openai_standard_uncached"
+        if is_openai
+        else "hypothetical_openai_admission_only",
     }
 
 
@@ -146,7 +149,7 @@ def start(request, investigation_id, thread, case, payload, clock):
     with Session(request.app.state.engine) as db, db.begin():
         draft = owned_draft(db, request, investigation_id, clock, payload.state_id)
         check_case(db, draft, thread, case)
-        configured_provider(request)
+        provider = configured_provider(request)
         if draft.draft_version != payload.expected_draft_version:
             raise conflict("STALE_DRAFT_VERSION", draft)
         operations = db.scalars(
@@ -190,6 +193,11 @@ def start(request, investigation_id, thread, case, payload, clock):
             selected = evidence_bundle(db, draft, evidence)
         except (ValueError, ValidationError, KeyError):
             raise GenerationFailure("AI_EVIDENCE_INVALID", retryable=False) from None
+        schema = (
+            FindingGenerationOutput.model_json_schema(schema_generator=FindingsProviderJsonSchema)
+            if provider.name == "openai"
+            else FindingGenerationOutput.model_json_schema()
+        )
         bundle = {
             "instructions": INSTRUCTIONS,
             "context": {"thread_kind": thread, "case_id": case},
@@ -200,6 +208,8 @@ def start(request, investigation_id, thread, case, payload, clock):
                 "service_tier": "default",
                 "store": False,
                 "background": False,
+                "stream": False,
+                "truncation": "disabled",
                 "tools": [],
                 "prompt_cache_options": {"mode": "explicit"},
                 "max_output_tokens": settings.ai_findings_max_output_tokens,
@@ -208,7 +218,7 @@ def start(request, investigation_id, thread, case, payload, clock):
                         "type": "json_schema",
                         "name": "opspilot_findings_v1",
                         "strict": True,
-                        "schema": FindingGenerationOutput.model_json_schema(),
+                        "schema": schema,
                     }
                 },
             },
@@ -230,7 +240,7 @@ def start(request, investigation_id, thread, case, payload, clock):
             retryable=False,
             expected_draft_version=draft.draft_version,
             post_start_version=draft.draft_version + 1,
-            provider="mock",
+            provider=provider.name,
             configured_model=settings.ai_findings_model,
             prompt_version=PROMPT_VERSION,
             schema_version="task5.v1",
@@ -251,6 +261,7 @@ def start(request, investigation_id, thread, case, payload, clock):
             draft.draft_version,
             bundle,
             budget,
+            operation.deadline_at,
             monotonic() + settings.ai_findings_deadline_seconds,
         )
 
@@ -279,20 +290,23 @@ def finish_failure(operation, error, clock, status="failed"):
     operation.finished_at = max(clock(), operation.requested_at)
 
 
+def token_cost(budget, input_tokens, output_tokens):
+    return (
+        Decimal(input_tokens) * Decimal(budget["input_price_per_million"])
+        + Decimal(output_tokens) * Decimal(budget["output_price_per_million"])
+    ) / Decimal(1_000_000)
+
+
 def reserve(request, attempt, count, clock):
     if (
         type(count.input_tokens) is not int
         or count.input_tokens < 0
-        or count.kind != "mock_estimate"
+        or count.kind != attempt.budget["token_count_kind"]
     ):
         raise GenerationFailure("AI_PREFLIGHT_FAILED")
     if count.input_tokens > attempt.budget["max_input_tokens"]:
         raise GenerationFailure("AI_INPUT_LIMIT", 422, False)
-    amount = (
-        Decimal(count.input_tokens) * Decimal(attempt.budget["input_price_per_million"])
-        + Decimal(attempt.budget["max_output_tokens"])
-        * Decimal(attempt.budget["output_price_per_million"])
-    ) / Decimal(1000000)
+    amount = token_cost(attempt.budget, count.input_tokens, attempt.budget["max_output_tokens"])
     if amount > Decimal(attempt.budget["max_attempt_usd"]):
         raise GenerationFailure("AI_BUDGET_EXCEEDED", 422, False)
     with Session(request.app.state.engine) as db, db.begin():
@@ -393,6 +407,32 @@ def publish(db, operation, output, clock):
     operation.normalized_output = output.model_dump(mode="json")
     operation.status, operation.retryable = "completed", False
     operation.finished_at = max(clock(), operation.requested_at)
+
+
+def generation_history_entry(operation: AIGenerationRequest) -> GenerationHistory:
+    expected_model = (
+        "mock-findings-v1" if operation.provider == "mock" else operation.configured_model
+    )
+    model_verified = operation.returned_model == expected_model
+    return GenerationHistory(
+        generation_id=operation.generation_id,
+        evidence_request_id=operation.evidence_request_id,
+        retry_of_generation_id=operation.retry_of_generation_id,
+        status=operation.status,
+        requested_at=operation.requested_at,
+        deadline_at=operation.deadline_at,
+        finished_at=operation.finished_at,
+        failure_code=operation.failure_code,
+        retryable=operation.retryable,
+        provider=operation.provider,
+        configured_model=operation.configured_model,
+        returned_model=expected_model if model_verified else None,
+        prompt_version=operation.prompt_version,
+        schema_version=operation.schema_version,
+        usage=operation.usage if model_verified else None,
+        actual_cost_usd=operation.actual_cost_usd if model_verified else None,
+        estimated_cost_usd=operation.reserved_cost_usd,
+    )
 
 
 def view(db, request, draft, thread, case):
@@ -515,33 +555,7 @@ def view(db, request, draft, thread, case):
         cited_records=[records[key] for key in sorted(cited_ids)],
         source_outcomes=bundle["evidence"]["source_outcomes"] if bundle else [],
         relationships=bundle["evidence"]["relationships"] if bundle else [],
-        generation_history=[
-            GenerationHistory(
-                **{
-                    f: getattr(o, f)
-                    for f in (
-                        "generation_id",
-                        "evidence_request_id",
-                        "retry_of_generation_id",
-                        "status",
-                        "requested_at",
-                        "deadline_at",
-                        "finished_at",
-                        "failure_code",
-                        "retryable",
-                        "provider",
-                        "configured_model",
-                        "returned_model",
-                        "prompt_version",
-                        "schema_version",
-                        "usage",
-                        "actual_cost_usd",
-                    )
-                },
-                estimated_cost_usd=o.reserved_cost_usd,
-            )
-            for o in history
-        ],
+        generation_history=[generation_history_entry(operation) for operation in history],
     )
 
 
@@ -555,11 +569,29 @@ def publication_expired(operation, attempt, clock):
     return utc_expired or monotonic_expired
 
 
-def retain_mock_usage(operation, result):
-    if result is not None:
+def retain_provider_metadata(operation, result):
+    if result is None:
+        return
+    if operation.provider == "mock":
         operation.returned_model = "mock-findings-v1"
         operation.usage = {"input_tokens": 0, "output_tokens": 0}
         operation.actual_cost_usd = Decimal(0)
+        return
+
+    if result.model != operation.configured_model:
+        return
+    operation.returned_model = operation.configured_model
+    operation.provider_response_id = result.response_id
+    operation.usage = result.usage
+    if (
+        result.usage is not None
+        and result.standard_tier
+        and result.usage.get("cached_input_tokens") == 0
+        and result.usage.get("cache_write_tokens") == 0
+    ):
+        operation.actual_cost_usd = token_cost(
+            operation.budget, result.usage["input_tokens"], result.usage["output_tokens"]
+        )
 
 
 def interrupt_expired_publication(request, attempt, clock, result):
@@ -568,7 +600,7 @@ def interrupt_expired_publication(request, attempt, clock, result):
     with Session(request.app.state.engine) as db, db.begin():
         draft, operation, rejected = fenced_operation(db, request, attempt, clock)
         if rejected is None:
-            retain_mock_usage(operation, result)
+            retain_provider_metadata(operation, result)
             finish_failure(operation, error, clock, "interrupted")
             advance(draft, clock)
             error.details = {
@@ -597,7 +629,7 @@ def finalize_transaction(request, attempt, clock, *, output=None, result=None, e
         if rejected is None:
             if publication_expired(operation, attempt, clock):
                 raise PublicationDeadlineExceeded()
-            retain_mock_usage(operation, result)
+            retain_provider_metadata(operation, result)
             if error is None:
                 publish(db, operation, output, clock)
             else:
@@ -628,31 +660,36 @@ def finalize_transaction(request, attempt, clock, *, output=None, result=None, e
     return response
 
 
-async def invoke(provider, method, attempt):
+async def invoke(provider, method, attempt, clock):
+    # Copy before checking time so preparation cannot consume the SDK's remaining budget.
+    bundle = deepcopy(attempt.bundle)
+    is_count = method == "count_input"
+    remaining = min((attempt.deadline_at - clock()).total_seconds(), attempt.end - monotonic())
     # Keep the same publication reserve enforced by startup configuration validation.
     timeout = min(
-        attempt.budget["count_timeout" if method == "count_input" else "model_timeout"],
-        attempt.end - monotonic() - FINDINGS_PUBLICATION_RESERVE_SECONDS,
+        attempt.budget["count_timeout" if is_count else "model_timeout"],
+        remaining - FINDINGS_PUBLICATION_RESERVE_SECONDS,
     )
     if timeout <= 0:
         raise GenerationFailure("AI_DEADLINE_EXCEEDED")
     try:
-        # A provider cannot mutate the persisted source of truth or the next call's input.
-        return await asyncio.wait_for(
-            getattr(provider, method)(deepcopy(attempt.bundle), timeout=timeout), timeout
-        )
+        return await asyncio.wait_for(getattr(provider, method)(bundle, timeout=timeout), timeout)
     except TimeoutError:
         raise GenerationFailure("AI_DEADLINE_EXCEEDED") from None
     except ProviderFailure as exc:
         code = {
             "configuration": "AI_CONFIGURATION_ERROR",
             "rate_limit": "AI_PROVIDER_RATE_LIMITED",
+            "connection": "AI_PREFLIGHT_FAILED" if is_count else "AI_PROVIDER_UNAVAILABLE",
             "unavailable": "AI_PROVIDER_UNAVAILABLE",
+            "invalid": "AI_PREFLIGHT_FAILED" if is_count else "AI_OUTPUT_INVALID",
         }[exc.kind]
-        raise GenerationFailure(code, retryable=exc.kind != "configuration") from None
+        raise GenerationFailure(
+            code, 502 if code == "AI_OUTPUT_INVALID" else 503, retryable=exc.kind != "configuration"
+        ) from None
     except Exception:
         raise GenerationFailure(
-            "AI_PREFLIGHT_FAILED" if method == "count_input" else "AI_PROVIDER_UNAVAILABLE"
+            "AI_PREFLIGHT_FAILED" if is_count else "AI_PROVIDER_UNAVAILABLE"
         ) from None
 
 
@@ -678,18 +715,25 @@ async def generate_findings(
         )
         provider, result = configured_provider(request), None
         try:
-            count = await invoke(provider, "count_input", attempt)
+            count = await invoke(provider, "count_input", attempt, clock)
             await run_in_threadpool(reserve, request, attempt, count, clock)
-            result = await invoke(provider, "generate", attempt)
+            result = await invoke(provider, "generate", attempt, clock)
             if result.status != "completed":
                 raise GenerationFailure(
-                    "AI_REFUSED" if result.status == "refused" else "AI_OUTPUT_INCOMPLETE",
-                    422 if result.status == "refused" else 502,
-                    result.status != "refused",
+                    *{
+                        "refused": ("AI_REFUSED", 422, False),
+                        "incomplete": ("AI_OUTPUT_INCOMPLETE", 502, True),
+                        "invalid": ("AI_OUTPUT_INVALID", 502, True),
+                        "failed": ("AI_PROVIDER_UNAVAILABLE", 503, True),
+                        "configuration": ("AI_CONFIGURATION_ERROR", 503, False),
+                    }[result.status]
                 )
-            if not isinstance(result.output_json, str) or len(result.output_json.encode()) > 65536:
-                raise GenerationFailure("AI_OUTPUT_INVALID", 502)
             try:
+                if (
+                    not isinstance(result.output_json, str)
+                    or len(result.output_json.encode()) > 65536
+                ):
+                    raise ValueError("Invalid output size")
                 output = FindingGenerationOutput.model_validate(
                     json.loads(result.output_json, object_pairs_hook=unique_json_object)
                 )
