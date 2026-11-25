@@ -32,6 +32,7 @@ class Settings(BaseModel):
     current_dataset_version: str = "synthetic-payments-v0.1"
     ai_findings_enabled: bool = False
     ai_findings_provider: Literal["mock", "openai"] = "mock"
+    openai_api_key: SecretStr | None = Field(default=None, exclude=True, repr=False)
     ai_findings_model: str = "gpt-6-luna"
     ai_findings_max_input_tokens: int = Field(default=12000, gt=0)
     ai_findings_max_output_tokens: int = Field(default=3000, gt=0)
@@ -79,7 +80,7 @@ class Settings(BaseModel):
     def from_env(cls) -> "Settings":
         load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
         try:
-            return cls(
+            settings = cls(
                 database_url=os.environ.get("DATABASE_URL", ""),
                 public_origin=os.environ.get("PUBLIC_ORIGIN", "https://localhost:3000"),
                 visitor_session_ttl_seconds=os.environ.get("VISITOR_SESSION_TTL_SECONDS", "86400"),
@@ -92,6 +93,11 @@ class Settings(BaseModel):
                     if name.startswith("ai_findings_") and name.upper() in os.environ
                 },
             )
+            if settings.ai_findings_enabled and settings.ai_findings_provider == "openai":
+                key = os.environ.get("OPENAI_API_KEY")
+                if key:
+                    return settings.model_copy(update={"openai_api_key": SecretStr(key)})
+            return settings
         except (ValidationError, ValueError) as exc:
             # Never include environment input or connection strings in startup errors.
             if isinstance(exc, ValidationError) and any(

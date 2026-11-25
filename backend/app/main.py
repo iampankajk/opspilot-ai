@@ -15,9 +15,11 @@ from app.catalog import initialize_catalog
 from app.config import Settings, validate_findings_deadline
 from app.database import build_engine, check_database, expected_schema_revision
 from app.evidence import router as evidence_router
+from app.findings import PRICES
 from app.findings import router as findings_router
 from app.findings_provider import MockFindingsProvider
 from app.investigations import router as investigation_router
+from app.openai_findings_provider import build_openai_provider
 from app.visitor_sessions import clear_session_cookie
 from app.visitor_sessions import router as visitor_router
 
@@ -63,28 +65,35 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise RuntimeError(str(exc)) from None
         app.state.engine = build_engine(app.state.settings)
         app.state.schema_revision = expected_schema_revision()
-        app.state.findings_provider = (
-            MockFindingsProvider()
-            if app.state.settings.ai_findings_enabled
-            and app.state.settings.ai_findings_provider == "mock"
-            else None
-        )
-        app.state.catalog = None
-        app.state.catalog_error = None
+        config = app.state.settings
+        live_provider = None
+        app.state.findings_provider = None
         try:
-            app.state.catalog = initialize_catalog(
-                app.state.engine, app.state.settings.current_dataset_version
-            )
-        except APIError as exc:
-            app.state.catalog_error = exc
-        except SQLAlchemyError:
-            app.state.catalog_error = APIError(
-                503, "DATABASE_UNAVAILABLE", "Database is unavailable."
-            )
-        try:
+            if config.ai_findings_enabled and config.ai_findings_model in PRICES:
+                if config.ai_findings_provider == "mock":
+                    app.state.findings_provider = MockFindingsProvider()
+                elif config.ai_findings_provider == "openai":
+                    live_provider = build_openai_provider(config.openai_api_key)
+                    app.state.findings_provider = live_provider
+            app.state.catalog = None
+            app.state.catalog_error = None
+            try:
+                app.state.catalog = initialize_catalog(
+                    app.state.engine, config.current_dataset_version
+                )
+            except APIError as exc:
+                app.state.catalog_error = exc
+            except SQLAlchemyError:
+                app.state.catalog_error = APIError(
+                    503, "DATABASE_UNAVAILABLE", "Database is unavailable."
+                )
             yield
         finally:
-            app.state.engine.dispose()
+            try:
+                if live_provider is not None:
+                    await live_provider.close()
+            finally:
+                app.state.engine.dispose()
 
     app = FastAPI(title="OpsPilot AI API", version="0.1.0", lifespan=lifespan)
     app.include_router(visitor_router)

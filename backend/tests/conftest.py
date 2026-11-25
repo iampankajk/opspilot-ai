@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import httpx2
 import pytest
 from alembic import command
 from alembic.config import Config
@@ -9,6 +10,19 @@ from sqlalchemy.engine import make_url
 
 from app.config import Settings
 from app.database import build_engine
+
+
+@pytest.fixture(autouse=True)
+def block_public_openai(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "")
+    send = httpx2.AsyncHTTPTransport.handle_async_request
+
+    async def guarded_send(transport, request):
+        if request.url.host == "api.openai.com":
+            pytest.fail("OpenAI SDK requests in tests require a fake transport")
+        return await send(transport, request)
+
+    monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", guarded_send)
 
 
 @pytest.fixture(scope="module")
