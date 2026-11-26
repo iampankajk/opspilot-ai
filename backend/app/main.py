@@ -15,9 +15,10 @@ from app.catalog import initialize_catalog
 from app.config import Settings, validate_findings_deadline
 from app.database import build_engine, check_database, expected_schema_revision
 from app.evidence import router as evidence_router
-from app.findings import PRICES
 from app.findings import router as findings_router
+from app.findings import supported_provider_model
 from app.findings_provider import MockFindingsProvider
+from app.gemini_findings_provider import build_gemini_provider
 from app.investigations import router as investigation_router
 from app.openai_findings_provider import build_openai_provider
 from app.visitor_sessions import clear_session_cookie
@@ -69,11 +70,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         live_provider = None
         app.state.findings_provider = None
         try:
-            if config.ai_findings_enabled and config.ai_findings_model in PRICES:
+            if config.ai_findings_enabled and supported_provider_model(config):
                 if config.ai_findings_provider == "mock":
                     app.state.findings_provider = MockFindingsProvider()
                 elif config.ai_findings_provider == "openai":
                     live_provider = build_openai_provider(config.openai_api_key)
+                    app.state.findings_provider = live_provider
+                elif config.ai_findings_provider == "gemini":
+                    live_provider = await build_gemini_provider(config.gemini_api_key)
                     app.state.findings_provider = live_provider
             app.state.catalog = None
             app.state.catalog_error = None

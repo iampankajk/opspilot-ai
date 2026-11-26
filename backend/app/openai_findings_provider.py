@@ -1,11 +1,9 @@
 """Translate one bounded findings attempt to the OpenAI Responses API."""
 
-import json
 import logging
 import os
 import re
 from http.cookiejar import CookieJar, DefaultCookiePolicy
-from typing import Never
 
 from httpx2 import Request, Response
 from openai import (
@@ -23,12 +21,21 @@ from openai.types.responses import (
 )
 from pydantic import SecretStr, ValidationError
 
-from app.findings_provider import InputCount, ProviderFailure, ProviderResult, ProviderStatus
+from app.findings_provider import (
+    InputCount,
+    ProviderFailure,
+    ProviderResult,
+    ProviderStatus,
+    evidence_message,
+    has_duplicate_json_field,
+    is_token_count,
+    mark_duplicate_json_fields,
+    reject_non_json_constant,
+)
 from app.findings_schemas import ProviderName
 
 MODEL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 RESPONSE_ID = re.compile(r"resp_[A-Za-z0-9_-]{1,251}")
-_DUPLICATE_JSON_FIELD = object()
 
 
 async def strip_cookie_headers(request: Request) -> None:
@@ -64,13 +71,10 @@ def build_openai_provider(api_key: SecretStr | None) -> "OpenAIFindingsProvider 
 
 def common_request(bundle: dict) -> dict:
     options = bundle["response_options"]
-    data = json.dumps(
-        {"context": bundle["context"], "evidence": bundle["evidence"]}, sort_keys=True
-    )
     return {
         **{key: options[key] for key in ("model", "text", "tools", "truncation", "reasoning")},
         "instructions": bundle["instructions"],
-        "input": [{"role": "user", "content": f"Selected synthetic case evidence (JSON):\n{data}"}],
+        "input": [{"role": "user", "content": evidence_message(bundle)}],
     }
 
 
@@ -91,35 +95,6 @@ async def send(request):
         raise ProviderFailure("unavailable") from None
     except (APIResponseValidationError, ValueError, TypeError):
         raise ProviderFailure("invalid") from None
-
-
-def is_token_count(value: object) -> bool:
-    return type(value) is int and 0 <= value <= 2_147_483_647
-
-
-def mark_duplicate_json_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
-    # Keep each duplicate at its original location without choosing either value.
-    fields = {}
-    for key, value in pairs:
-        fields[key] = _DUPLICATE_JSON_FIELD if key in fields else value
-    return fields
-
-
-def has_duplicate_json_field(value: object) -> bool:
-    pending = [value]
-    while pending:
-        item = pending.pop()
-        if item is _DUPLICATE_JSON_FIELD:
-            return True
-        if isinstance(item, dict):
-            pending.extend(item.values())
-        elif isinstance(item, list):
-            pending.extend(item)
-    return False
-
-
-def reject_non_json_constant(_: str) -> Never:
-    raise ValueError("Invalid JSON numeric literal")
 
 
 def decode_response_object(response: Response, discriminator: str) -> dict[str, object]:

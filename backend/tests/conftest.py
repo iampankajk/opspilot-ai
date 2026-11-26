@@ -13,13 +13,14 @@ from app.database import build_engine
 
 
 @pytest.fixture(autouse=True)
-def block_public_openai(monkeypatch):
+def block_live_findings_providers(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
     send = httpx2.AsyncHTTPTransport.handle_async_request
 
     async def guarded_send(transport, request):
-        if request.url.host == "api.openai.com":
-            pytest.fail("OpenAI SDK requests in tests require a fake transport")
+        if request.url.host in {"api.openai.com", "generativelanguage.googleapis.com"}:
+            pytest.fail("Findings provider requests in tests require a fake transport")
         return await send(transport, request)
 
     monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", guarded_send)

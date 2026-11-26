@@ -4,7 +4,7 @@ import asyncio
 import json
 from copy import deepcopy
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from time import monotonic
 from typing import Annotated
@@ -12,13 +12,13 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from app.api_errors import APIError
-from app.config import FINDINGS_PUBLICATION_RESERVE_SECONDS
+from app.config import FINDINGS_PUBLICATION_RESERVE_SECONDS, GEMINI_FINDINGS_MODEL
 from app.evidence import (
     advance,
     check_case,
@@ -46,6 +46,7 @@ from app.findings_validation import (
     returned_records,
     validate_references,
 )
+from app.gemini_findings_provider import gemini_response_options
 from app.generation_history import pending_generation
 from app.models import (
     AIGenerationRequest,
@@ -74,6 +75,7 @@ INSTRUCTIONS = (
 )
 # Reviewed Standard rates, 2026-11-24. Admission estimates are not billing caps.
 PRICES = {"gpt-6-luna": (Decimal("0.10"), Decimal("0.50"))}
+GEMINI_ADMISSION_LOCK = (0x4F505350, 1)  # OpsPilot's deployment-wide Gemini transaction lock.
 
 
 class GenerationFailure(APIError):
@@ -109,6 +111,12 @@ def unique_json_object(pairs):
     return result
 
 
+def supported_provider_model(settings):
+    if settings.ai_findings_provider == "gemini":
+        return settings.ai_findings_gemini_model == GEMINI_FINDINGS_MODEL
+    return settings.ai_findings_model in PRICES
+
+
 def configured_provider(request):
     settings = request.app.state.settings
     provider = request.app.state.findings_provider
@@ -117,25 +125,36 @@ def configured_provider(request):
     if (
         provider is None
         or provider.name != settings.ai_findings_provider
-        or settings.ai_findings_model not in PRICES
+        or not supported_provider_model(settings)
     ):
         raise GenerationFailure("AI_CONFIGURATION_ERROR", retryable=False)
     return provider
 
 
 def budget_view(settings):
-    input_price, output_price = PRICES[settings.ai_findings_model]
-    is_openai = settings.ai_findings_provider == "openai"
-    return {
+    provider = settings.ai_findings_provider
+    budget = {
         "max_input_tokens": settings.ai_findings_max_input_tokens,
         "max_output_tokens": settings.ai_findings_max_output_tokens,
         "max_attempt_usd": str(settings.ai_findings_max_attempt_usd),
+        "provider": provider,
+        "model_timeout": settings.ai_findings_model_timeout_seconds,
+        "count_timeout": settings.ai_findings_count_timeout_seconds,
+    }
+    if provider == "gemini":
+        return budget | {
+            "input_price_per_million": "0.00",
+            "output_price_per_million": "0.00",
+            "price_verified_at": "2026-11-25",
+            "token_count_kind": "gemini_count_tokens",
+            "cost_basis": "gemini_developer_api_free_estimate",
+        }
+    input_price, output_price = PRICES[settings.ai_findings_model]
+    is_openai = provider == "openai"
+    return budget | {
         "input_price_per_million": str(input_price),
         "output_price_per_million": str(output_price),
         "price_verified_at": "2026-11-24",
-        "provider": settings.ai_findings_provider,
-        "model_timeout": settings.ai_findings_model_timeout_seconds,
-        "count_timeout": settings.ai_findings_count_timeout_seconds,
         "token_count_kind": "openai_input_tokens" if is_openai else "mock_estimate",
         "cost_basis": "openai_standard_uncached"
         if is_openai
@@ -143,10 +162,61 @@ def budget_view(settings):
     }
 
 
+def response_options(settings, provider):
+    if provider == "gemini":
+        return gemini_response_options(settings.ai_findings_max_output_tokens)
+    schema = (
+        FindingGenerationOutput.model_json_schema(schema_generator=FindingsProviderJsonSchema)
+        if provider == "openai"
+        else FindingGenerationOutput.model_json_schema()
+    )
+    return {
+        "model": settings.ai_findings_model,
+        "reasoning": {"effort": "none"},
+        "service_tier": "default",
+        "store": False,
+        "background": False,
+        "stream": False,
+        "truncation": "disabled",
+        "tools": [],
+        "prompt_cache_options": {"mode": "explicit"},
+        "max_output_tokens": settings.ai_findings_max_output_tokens,
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "opspilot_findings_v1",
+                "strict": True,
+                "schema": schema,
+            }
+        },
+    }
+
+
+def gemini_admission_time(db):
+    if not db.scalar(select(func.pg_try_advisory_xact_lock(*GEMINI_ADMISSION_LOCK))):
+        raise GenerationFailure("AI_LOCAL_RATE_LIMITED", 429)
+
+    # Each statement sees the prior lock holder's committed start under READ COMMITTED.
+    now = db.scalar(select(func.clock_timestamp())).astimezone(UTC)
+    recent = AIGenerationRequest.requested_at > now - timedelta(hours=24)
+    paced = AIGenerationRequest.requested_at > now - timedelta(minutes=1)
+    active = (AIGenerationRequest.status == "pending") & (AIGenerationRequest.deadline_at > now)
+    daily, minute, pending = db.execute(
+        select(
+            func.count().filter(recent), func.count().filter(paced), func.count().filter(active)
+        ).where(AIGenerationRequest.provider == "gemini", recent | active)
+    ).one()
+    if daily >= 5 or minute or pending:
+        raise GenerationFailure("AI_LOCAL_RATE_LIMITED", 429)
+    return now
+
+
 def start(request, investigation_id, thread, case, payload, clock):
     reconcile_owned(request, investigation_id, payload.state_id, thread, case, clock)
     settings = request.app.state.settings
     with Session(request.app.state.engine) as db, db.begin():
+        if settings.ai_findings_provider == "gemini":
+            db.connection(execution_options={"isolation_level": "READ COMMITTED"})
         draft = owned_draft(db, request, investigation_id, clock, payload.state_id)
         check_case(db, draft, thread, case)
         provider = configured_provider(request)
@@ -193,40 +263,23 @@ def start(request, investigation_id, thread, case, payload, clock):
             selected = evidence_bundle(db, draft, evidence)
         except (ValueError, ValidationError, KeyError):
             raise GenerationFailure("AI_EVIDENCE_INVALID", retryable=False) from None
-        schema = (
-            FindingGenerationOutput.model_json_schema(schema_generator=FindingsProviderJsonSchema)
-            if provider.name == "openai"
-            else FindingGenerationOutput.model_json_schema()
-        )
+        options = response_options(settings, provider.name)
         bundle = {
             "instructions": INSTRUCTIONS,
             "context": {"thread_kind": thread, "case_id": case},
             "evidence": selected,
-            "response_options": {
-                "model": settings.ai_findings_model,
-                "reasoning": {"effort": "none"},
-                "service_tier": "default",
-                "store": False,
-                "background": False,
-                "stream": False,
-                "truncation": "disabled",
-                "tools": [],
-                "prompt_cache_options": {"mode": "explicit"},
-                "max_output_tokens": settings.ai_findings_max_output_tokens,
-                "text": {
-                    "format": {
-                        "type": "json_schema",
-                        "name": "opspilot_findings_v1",
-                        "strict": True,
-                        "schema": schema,
-                    }
-                },
-            },
+            "response_options": options,
         }
         # Independent of provider token counting: avoid unbounded serialization/storage.
         if len(json.dumps(bundle).encode()) > 131072:
             raise GenerationFailure("AI_INPUT_LIMIT", 422, False)
-        now, generation_id, budget = clock(), uuid4(), budget_view(settings)
+        end = None
+        if provider.name == "gemini":
+            end = monotonic() + settings.ai_findings_deadline_seconds
+            now = gemini_admission_time(db)
+        else:
+            now = clock()
+        generation_id, budget = uuid4(), budget_view(settings)
         operation = AIGenerationRequest(
             state_id=draft.state_id,
             generation_id=generation_id,
@@ -241,7 +294,7 @@ def start(request, investigation_id, thread, case, payload, clock):
             expected_draft_version=draft.draft_version,
             post_start_version=draft.draft_version + 1,
             provider=provider.name,
-            configured_model=settings.ai_findings_model,
+            configured_model=options["model"],
             prompt_version=PROMPT_VERSION,
             schema_version="task5.v1",
             input_bundle=bundle,
@@ -262,7 +315,7 @@ def start(request, investigation_id, thread, case, payload, clock):
             bundle,
             budget,
             operation.deadline_at,
-            monotonic() + settings.ai_findings_deadline_seconds,
+            end if end is not None else monotonic() + settings.ai_findings_deadline_seconds,
         )
 
 
@@ -301,6 +354,7 @@ def reserve(request, attempt, count, clock):
     if (
         type(count.input_tokens) is not int
         or count.input_tokens < 0
+        or (attempt.budget["provider"] == "gemini" and count.input_tokens == 0)
         or count.kind != attempt.budget["token_count_kind"]
     ):
         raise GenerationFailure("AI_PREFLIGHT_FAILED")
@@ -584,7 +638,8 @@ def retain_provider_metadata(operation, result):
     operation.provider_response_id = result.response_id
     operation.usage = result.usage
     if (
-        result.usage is not None
+        operation.provider == "openai"
+        and result.usage is not None
         and result.standard_tier
         and result.usage.get("cached_input_tokens") == 0
         and result.usage.get("cache_write_tokens") == 0
@@ -728,6 +783,13 @@ async def generate_findings(
                         "configuration": ("AI_CONFIGURATION_ERROR", 503, False),
                     }[result.status]
                 )
+            is_gemini = attempt.budget["provider"] == "gemini"
+            if (
+                is_gemini
+                and result.usage is not None
+                and result.usage["input_tokens"] > attempt.budget["max_input_tokens"]
+            ):
+                raise GenerationFailure("AI_INPUT_LIMIT", 422, False)
             try:
                 if (
                     not isinstance(result.output_json, str)
@@ -737,6 +799,10 @@ async def generate_findings(
                 output = FindingGenerationOutput.model_validate(
                     json.loads(result.output_json, object_pairs_hook=unique_json_object)
                 )
+                if is_gemini:
+                    key = request.app.state.settings.gemini_api_key
+                    if key and key.get_secret_value() in output.model_dump_json():
+                        raise ValueError("Provider output contains credential material")
             except (ValidationError, ValueError, RecursionError):
                 raise GenerationFailure("AI_OUTPUT_INVALID", 502) from None
             try:

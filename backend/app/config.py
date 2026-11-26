@@ -11,6 +11,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
 FINDINGS_PUBLICATION_RESERVE_SECONDS = 6
+GEMINI_FINDINGS_MODEL = "gemini-3.5-flash-lite"
 FINDINGS_DEADLINE_CONFIGURATION_ERROR = (
     "Invalid backend configuration: AI_FINDINGS_DEADLINE_SECONDS must be finite and greater "
     f"than the {FINDINGS_PUBLICATION_RESERVE_SECONDS}-second publication reserve."
@@ -31,9 +32,11 @@ class Settings(BaseModel):
     visitor_session_ttl_seconds: int = Field(default=86400, gt=0)
     current_dataset_version: str = "synthetic-payments-v0.1"
     ai_findings_enabled: bool = False
-    ai_findings_provider: Literal["mock", "openai"] = "mock"
+    ai_findings_provider: Literal["mock", "openai", "gemini"] = "mock"
     openai_api_key: SecretStr | None = Field(default=None, exclude=True, repr=False)
+    gemini_api_key: SecretStr | None = Field(default=None, exclude=True, repr=False)
     ai_findings_model: str = "gpt-6-luna"
+    ai_findings_gemini_model: str = GEMINI_FINDINGS_MODEL
     ai_findings_max_input_tokens: int = Field(default=12000, gt=0)
     ai_findings_max_output_tokens: int = Field(default=3000, gt=0)
     ai_findings_model_timeout_seconds: float = Field(default=10, gt=0, allow_inf_nan=False)
@@ -93,10 +96,11 @@ class Settings(BaseModel):
                     if name.startswith("ai_findings_") and name.upper() in os.environ
                 },
             )
-            if settings.ai_findings_enabled and settings.ai_findings_provider == "openai":
-                key = os.environ.get("OPENAI_API_KEY")
+            if settings.ai_findings_enabled and settings.ai_findings_provider != "mock":
+                key_field = f"{settings.ai_findings_provider}_api_key"
+                key = os.environ.get(key_field.upper())
                 if key:
-                    return settings.model_copy(update={"openai_api_key": SecretStr(key)})
+                    return settings.model_copy(update={key_field: SecretStr(key)})
             return settings
         except (ValidationError, ValueError) as exc:
             # Never include environment input or connection strings in startup errors.

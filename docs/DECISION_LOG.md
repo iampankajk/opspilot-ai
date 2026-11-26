@@ -85,9 +85,15 @@ Validation plan: the Blueprint's UX-R criteria cover the five views, both seeded
 |---|---|---|---|---|---|
 | D-035 | 2026-11-24 | Implement the OpenAI Responses adapter with `openai==3.58.0`, configurable default `gpt-6-luna`, and offline verification. | The owner approved the pin subject to lock compatibility and retained D-024–D-029's findings workflow and limits. | Use explicit server-side selection, retain the deterministic mock, count input before one bounded generation, and derive strict provider JSON Schema from Pydantic. Require independent Pydantic and reference validation before atomic publication. Reuse the six findings tables and allowlisted history. A live smoke test needs separate authorization. | Accepted |
 
+## Approved Gemini findings design
+
+| ID | Date | Decision | Context / alternatives | Consequences | Status |
+|---|---|---|---|---|---|
+| D-036 | 2026-11-25 | Add an opt-in Gemini provider using `gemini-3.5-flash-lite`, `MINIMAL` thinking, full-request token-count preflight, and at most five admitted starts per rolling 24 hours. Preserve mock and OpenAI, with zero automatic retries or provider fallback. | Owner approved the provider architecture and requested a restart-safe limit. The [Gemini design record](GEMINI_FINDINGS_PROVIDER.md#41-durable-gemini-admission) specifies durable counting through existing generation-attempt rows and a short PostgreSQL transaction lock. | Keep Gemini disabled by default. Verify the design offline before any separately authorized live calls. Google quotas and billing are checked separately, and claims require evidence-based human review. This is design approval. | Accepted |
+
 ## Historical review label crosswalk
 
-Former D1–D13 labels were local to the design review, not alternatives to existing D-001–D-013. For example, review D12 resolves D-004; it is not canonical D-012. These aliases remain here for traceability only. Use canonical IDs in future documentation. The next unused canonical ID is D-036.
+Former D1–D13 labels were local to the design review, not alternatives to existing D-001–D-013. For example, review D12 resolves D-004; it is not canonical D-012. These aliases remain here for traceability only. Use canonical IDs in future documentation. The next unused canonical ID is D-037.
 
 | Former review label | Canonical decision ID | Topic |
 |---|---|---|
