@@ -111,6 +111,24 @@ def unique_json_object(pairs):
     return result
 
 
+def contains_secret(value: object, secret: str) -> bool:
+    """Scan decoded values iteratively so JSON escaping cannot hide a credential."""
+    if not secret:
+        return False
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if isinstance(item, str):
+            if secret in item:
+                return True
+        elif isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, (list, tuple, set)):
+            pending.extend(item)
+    return False
+
+
 def supported_provider_model(settings):
     if settings.ai_findings_provider == "gemini":
         return settings.ai_findings_gemini_model == GEMINI_FINDINGS_MODEL
@@ -796,12 +814,15 @@ async def generate_findings(
                     or len(result.output_json.encode()) > 65536
                 ):
                     raise ValueError("Invalid output size")
-                output = FindingGenerationOutput.model_validate(
-                    json.loads(result.output_json, object_pairs_hook=unique_json_object)
-                )
+                decoded = json.loads(result.output_json, object_pairs_hook=unique_json_object)
+                output = FindingGenerationOutput.model_validate(decoded)
                 if is_gemini:
                     key = request.app.state.settings.gemini_api_key
-                    if key and key.get_secret_value() in output.model_dump_json():
+                    secret = key.get_secret_value() if key is not None else ""
+                    if secret and (
+                        contains_secret(decoded, secret)
+                        or contains_secret(output.model_dump(), secret)
+                    ):
                         raise ValueError("Provider output contains credential material")
             except (ValidationError, ValueError, RecursionError):
                 raise GenerationFailure("AI_OUTPUT_INVALID", 502) from None
