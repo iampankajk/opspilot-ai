@@ -700,15 +700,24 @@ def test_full_request_parity_usage_and_private_metadata(deployment, wire, monkey
     }
     assert generation_config == row.input_bundle["response_options"]["generationConfig"]
     for object_schema in [schema, *schema["$defs"].values()]:
+        assert object_schema["type"] == "object"
         assert object_schema["additionalProperties"] is False
         assert set(object_schema["required"]) == set(object_schema["properties"])
     assert schema["properties"]["schema_version"]["enum"] == ["task5.v1"]
+    assert schema["properties"]["findings"]["items"] == {"$ref": "#/$defs/FindingDraft"}
     assert {"type": "null"} in schema["properties"]["no_findings_reason"]["anyOf"]
-    assert schema["properties"]["findings"]["maxItems"] == 6
-    assert (
-        schema["$defs"]["BasisStatement"]["properties"]["citation_indexes"]["items"]["maximum"] == 7
-    )
-    for keyword in ("minLength", "maxLength", "pattern", "exclusiveMaximum"):
+    for keyword in (
+        "minLength",
+        "maxLength",
+        "pattern",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minimum",
+        "maximum",
+        "minItems",
+        "maxItems",
+        "title",
+    ):
         assert f'"{keyword}":' not in json.dumps(schema)
     assert (
         FindingGenerationOutput.model_json_schema()["$defs"]["FindingDraft"]["properties"]["claim"][
@@ -2239,3 +2248,63 @@ def test_upstream_error_without_attached_request_preserves_http_classification(
     assert gemini_diagnostics(caplog) == [expected]
     for marker in (PRIVATE, SYNTHETIC_AQ_KEY):
         assert marker not in caplog.text + capture.out + capture.err
+
+
+@pytest.mark.parametrize(
+    "violation",
+    [
+        "too-many-findings",
+        "too-many-citations",
+        "empty-rationale",
+        "too-many-rationale",
+        "too-many-limitations",
+        "too-many-next-questions",
+        "negative-citation-index",
+        "oversized-citation-index",
+    ],
+)
+def test_simplified_wire_schema_still_enforces_strict_application_bounds(
+    gemini, wire, caplog, violation
+):
+    client, engine = gemini
+    output = cited_output()
+    finding = output["findings"][0]
+    base_citation = dict(finding["citations"][0])
+    base_rationale = dict(finding["rationale"][0])
+    base_limitation = {
+        "text": "Provider completeness is unverified.",
+        "kind": "evidence_statement",
+        "citation_indexes": [0],
+        "result_source_keys": [],
+    }
+    match violation:
+        case "too-many-findings":
+            output["findings"] = [dict(finding) for _ in range(7)]
+        case "too-many-citations":
+            finding["citations"] = [dict(base_citation) for _ in range(9)]
+        case "empty-rationale":
+            finding["rationale"] = []
+        case "too-many-rationale":
+            finding["rationale"] = [dict(base_rationale) for _ in range(4)]
+        case "too-many-limitations":
+            finding["limitations"] = [dict(base_limitation) for _ in range(5)]
+        case "too-many-next-questions":
+            finding["next_questions"] = [f"Question {index}?" for index in range(4)]
+        case "negative-citation-index":
+            finding["rationale"][0]["citation_indexes"] = [-1]
+        case "oversized-citation-index":
+            finding["rationale"][0]["citation_indexes"] = [8]
+        case _:
+            raise AssertionError(f"Unsupported violation: {violation}")
+
+    wire[1][GENERATE] = lambda _: httpx2.Response(200, json=gemini_body(output=output))
+    workspace = prepare(client)
+    with caplog.at_level(logging.DEBUG):
+        response = generate(client, workspace)
+    check_error(response, 502, "AI_OUTPUT_INVALID", True)
+    assert [item.url.path for item in wire[0]] == [COUNT, GENERATE]
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == "AI_OUTPUT_INVALID"
+    assert row.normalized_output is None
+    assert graph_counts(engine, workspace) == [0] * 5
+    assert FAKE_KEY not in response.text + caplog.text + str(vars(row))
