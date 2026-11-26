@@ -27,7 +27,7 @@ from app.findings_schemas import FindingGenerationOutput, FindingsProviderJsonSc
 
 API_ORIGIN = "https://generativelanguage.googleapis.com"
 MODEL_PATH = f"/v1/models/{GEMINI_FINDINGS_MODEL}"
-API_KEY = re.compile(r"[A-Za-z0-9_-]{1,256}")
+API_KEY = re.compile(r"[!-~]{1,256}")
 RESPONSE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 BLOCKED_PROMPTS = {"SAFETY", "OTHER", "BLOCKLIST", "PROHIBITED_CONTENT", "IMAGE_SAFETY"}
 REFUSAL_REASONS = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}

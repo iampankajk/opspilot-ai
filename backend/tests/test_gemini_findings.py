@@ -40,6 +40,19 @@ MODEL = GEMINI_FINDINGS_MODEL
 COUNT = f"/v1/models/{MODEL}:countTokens"
 GENERATE = f"/v1/models/{MODEL}:generateContent"
 FAKE_KEY = "gemini-offline-key-placeholder"
+
+
+def build_synthetic_aq_key(infix: str = "") -> str:
+    """Assemble a 53-char synthetic AQ. test key at runtime without a contiguous literal."""
+    prefix = ".".join(("AQ", "offline"))
+    label = "_".join(("synthetic", "test", "key"))
+    suffix = "0123456789abcdef" * 3
+    key = f"{prefix}-{infix}{label}_{suffix}"[:53]
+    assert len(key) == 53 and key.startswith("AQ.")
+    return key
+
+
+SYNTHETIC_AQ_KEY = build_synthetic_aq_key()
 RESPONSE_ID = "offline_response_ID-2"
 PRIVATE = "private-gemini-test-marker"
 EMPTY = {"schema_version": "task5.v1", "findings": [], "no_findings_reason": "no_assessable_claims"}
@@ -110,8 +123,7 @@ def deployment(database, migration_ddl, monkeypatch):
             connection.execute(DropSchema(schema, cascade=True))
 
 
-@pytest.fixture
-def wire(monkeypatch):
+def install_wire(monkeypatch, *, expected_key: str = FAKE_KEY):
     received = []
     handlers = {
         COUNT: lambda _: httpx2.Response(200, json={"totalTokens": 6000}),
@@ -123,12 +135,14 @@ def wire(monkeypatch):
         assert request.url.scheme == "https"
         assert request.url.host == "generativelanguage.googleapis.com"
         assert not request.url.query
-        assert request.headers["x-goog-api-key"] == FAKE_KEY
+        assert request.headers["x-goog-api-key"] == expected_key
         assert (
             not {"cookie", "cookie2", "authorization", "x-goog-user-project"}
             & request.headers.keys()
         )
-        assert all(marker not in request.content for marker in (FAKE_KEY.encode(), b"postgresql+"))
+        assert all(
+            marker not in request.content for marker in (expected_key.encode(), b"postgresql+")
+        )
         received.append(request)
         response = handlers[request.url.path](request)
         if asyncio.iscoroutine(response):
@@ -137,6 +151,11 @@ def wire(monkeypatch):
 
     monkeypatch.setattr(httpx2.AsyncHTTPTransport, "handle_async_request", dispatch)
     return received, handlers
+
+
+@pytest.fixture
+def wire(monkeypatch):
+    return install_wire(monkeypatch)
 
 
 def worker(config, clock=None):
@@ -191,6 +210,8 @@ def test_settings_load_only_the_enabled_provider_key(monkeypatch):
         ({"ai_findings_enabled": False}, "AI_NOT_CONFIGURED"),
         ({"gemini_api_key": None}, "AI_CONFIGURATION_ERROR"),
         ({"gemini_api_key": SecretStr("invalid\r\nheader")}, "AI_CONFIGURATION_ERROR"),
+        ({"gemini_api_key": SecretStr("AQ.invalid key")}, "AI_CONFIGURATION_ERROR"),
+        ({"gemini_api_key": SecretStr("A" * 257)}, "AI_CONFIGURATION_ERROR"),
         ({"ai_findings_gemini_model": "other-model"}, "AI_CONFIGURATION_ERROR"),
     ],
 )
@@ -202,6 +223,314 @@ def test_incompatible_config_never_builds_or_calls_an_adapter(deployment, wire, 
         assert client.app.state.findings_provider is None
         check_error(generate(client, workspace), 503, code, False)
         assert attempts(engine, workspace) == [] and wire[0] == []
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        SYNTHETIC_AQ_KEY,
+        "!",
+        "".join(chr(code) for code in range(0x21, 0x7F)),
+        "A" * 256,
+    ],
+    ids=["synthetic-aq-53", "min-len-1", "all-printable-ascii", "max-len-256"],
+)
+def test_build_gemini_provider_accepts_printable_ascii_keys(candidate):
+    assert len(SYNTHETIC_AQ_KEY) == 53 and SYNTHETIC_AQ_KEY.startswith("AQ.")
+
+    async def check():
+        provider = await build_gemini_provider(SecretStr(candidate))
+        assert provider is not None
+        try:
+            assert provider._key.get_secret_value() == candidate
+            assert not provider.transport.is_closed
+        finally:
+            await provider.close()
+        assert provider.transport.is_closed
+
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        None,
+        "",
+        " ",
+        " AQ.key",
+        "AQ.key ",
+        "AQ. key",
+        "AQ.\tkey",
+        "AQ.\nkey",
+        "AQ.key\n",
+        "AQ.\rkey",
+        "invalid\r\nheader",
+        "AQ.\x00key",
+        "AQ.\x1fkey",
+        "AQ.\x7fkey",
+        "AQ.kéy",
+        "AQ.\u00a0key",
+        "AQ.\u200bkey",
+        "A" * 257,
+    ],
+    ids=[
+        "none",
+        "empty",
+        "space-only",
+        "leading-space",
+        "trailing-space",
+        "internal-space",
+        "tab",
+        "lf",
+        "trailing-lf",
+        "cr",
+        "crlf",
+        "nul",
+        "unit-separator",
+        "del",
+        "non-ascii",
+        "nbsp",
+        "zero-width-space",
+        "over-256",
+    ],
+)
+def test_build_gemini_provider_rejects_unsafe_or_oversized_keys(candidate):
+    secret = None if candidate is None else SecretStr(candidate)
+    assert asyncio.run(build_gemini_provider(secret)) is None
+
+
+def test_synthetic_aq_key_runs_findings_generation_without_leaking(
+    deployment, monkeypatch, capsys, caplog
+):
+    assert len(SYNTHETIC_AQ_KEY) == 53 and SYNTHETIC_AQ_KEY.startswith("AQ.")
+    monkeypatch.setattr("app.config.load_dotenv", lambda *args, **kwargs: None)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://test@localhost/opspilot_test")
+    monkeypatch.setenv("AI_FINDINGS_ENABLED", "true")
+    monkeypatch.setenv("AI_FINDINGS_PROVIDER", "gemini")
+    monkeypatch.setenv("GEMINI_API_KEY", SYNTHETIC_AQ_KEY)
+    loaded = Settings.from_env()
+    assert loaded.gemini_api_key == SecretStr(SYNTHETIC_AQ_KEY)
+    assert "gemini_api_key" not in loaded.model_dump() and SYNTHETIC_AQ_KEY not in repr(loaded)
+
+    engine, config = deployment
+    received, _ = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        assert client.app.state.findings_provider is not None
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        assert response.status_code == 201, response.text
+        assert response.json()["findings"]
+        reloaded = read(client, workspace)
+        assert reloaded.status_code == 200, reloaded.text
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    (row,) = attempts(engine, workspace)
+    assert row.status == "completed" and row.returned_model == MODEL
+    for text_blob in (
+        response.text,
+        reloaded.text,
+        caplog.text,
+        capture.out,
+        capture.err,
+        str(vars(row)),
+    ):
+        assert SYNTHETIC_AQ_KEY not in text_blob
+
+
+@pytest.mark.parametrize(
+    "scenario,status,code",
+    [
+        ("upstream-error", 503, "AI_PROVIDER_UNAVAILABLE"),
+        ("leaked-output", 502, "AI_OUTPUT_INVALID"),
+    ],
+)
+def test_synthetic_aq_key_error_paths_never_leak_key(
+    deployment, monkeypatch, capsys, caplog, scenario, status, code
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    if scenario == "upstream-error":
+        handlers[GENERATE] = lambda _: httpx2.Response(
+            503,
+            json={"error": {"message": f"{PRIVATE} {SYNTHETIC_AQ_KEY}"}},
+        )
+    else:
+        output = cited_output()
+        output["findings"][0]["claim"] = SYNTHETIC_AQ_KEY
+        handlers[GENERATE] = lambda _: httpx2.Response(
+            200,
+            json=gemini_body(output=output, responseId=SYNTHETIC_AQ_KEY),
+        )
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, status, code, True)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == code
+    assert row.normalized_output is None and row.provider_response_id is None
+    for text_blob in (
+        response.text,
+        caplog.text,
+        capture.out,
+        capture.err,
+        str(vars(row)),
+    ):
+        assert SYNTHETIC_AQ_KEY not in text_blob
+    assert PRIVATE not in response.text and PRIVATE not in caplog.text
+
+
+QUOTED_KEY = build_synthetic_aq_key('"')
+BACKSLASH_KEY = build_synthetic_aq_key("\\")
+QUOTED_BACKSLASH_KEY = build_synthetic_aq_key('"\\')
+
+
+def nested_output_with_secret(location: str, secret: str) -> dict:
+    output = cited_output()
+    finding = output["findings"][0]
+    finding["limitations"] = [
+        {
+            "text": "Additional bank evidence is missing.",
+            "kind": "evidence_statement",
+            "citation_indexes": [0],
+            "result_source_keys": [],
+        }
+    ]
+    finding["next_questions"] = ["Was a separate bank debit posted?"]
+    match location:
+        case "claim":
+            finding["claim"] = f"Observed marker {secret}"
+        case "citation_explanation":
+            finding["citations"][0]["explanation"] = f"Explanation {secret}"
+        case "citation_pointer":
+            finding["citations"][0]["pointer"] = f"/payload/{secret}"
+        case "rationale_text":
+            finding["rationale"][0]["text"] = f"Rationale {secret}"
+        case "limitation_text":
+            finding["limitations"][0]["text"] = f"Limitation {secret}"
+        case "next_question":
+            finding["next_questions"][0] = f"Follow up on {secret}?"
+        case _:
+            raise AssertionError(f"Unsupported test location: {location}")
+    return output
+
+
+@pytest.mark.parametrize(
+    "api_key,location",
+    [
+        (QUOTED_KEY, "claim"),
+        (BACKSLASH_KEY, "claim"),
+        (QUOTED_BACKSLASH_KEY, "claim"),
+        (QUOTED_BACKSLASH_KEY, "citation_explanation"),
+        (QUOTED_BACKSLASH_KEY, "citation_pointer"),
+        (QUOTED_BACKSLASH_KEY, "rationale_text"),
+        (QUOTED_BACKSLASH_KEY, "limitation_text"),
+        (QUOTED_BACKSLASH_KEY, "next_question"),
+        (SYNTHETIC_AQ_KEY, "claim"),
+        (SYNTHETIC_AQ_KEY, "rationale_text"),
+    ],
+    ids=[
+        "quote-in-claim",
+        "backslash-in-claim",
+        "quote-and-backslash-in-claim",
+        "nested-citation-explanation",
+        "nested-citation-pointer",
+        "nested-rationale-text",
+        "nested-limitation-text",
+        "nested-next-question",
+        "aq-key-in-claim",
+        "aq-key-in-rationale",
+    ],
+)
+def test_reflected_gemini_credentials_including_json_escapes_are_rejected(
+    deployment, monkeypatch, capsys, caplog, api_key, location
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=api_key)
+    handlers[GENERATE] = lambda _: httpx2.Response(
+        200,
+        json=gemini_body(output=nested_output_with_secret(location, api_key)),
+    )
+    key_config = config.model_copy(update={"gemini_api_key": SecretStr(api_key)})
+    with worker(key_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 502, "AI_OUTPUT_INVALID", True)
+        reloaded = read(client, workspace)
+        assert reloaded.status_code == 200, reloaded.text
+        reloaded_body = reloaded.json()
+        assert reloaded_body["findings"] == []
+        assert reloaded_body["generation_status"] == "failed"
+        assert reloaded_body["generation_history"][0]["failure_code"] == "AI_OUTPUT_INVALID"
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    assert graph_counts(engine, workspace) == [0] * 5
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == "AI_OUTPUT_INVALID"
+    assert row.normalized_output is None and row.provider_response_id == RESPONSE_ID
+    escaped_key = json.dumps(api_key)[1:-1]
+    for text_blob in (
+        response.text,
+        reloaded.text,
+        caplog.text,
+        capture.out,
+        capture.err,
+        str(vars(row)),
+    ):
+        assert api_key not in text_blob
+        assert escaped_key not in text_blob
+
+
+@pytest.mark.parametrize(
+    "api_key",
+    [SYNTHETIC_AQ_KEY, QUOTED_BACKSLASH_KEY],
+    ids=["synthetic-aq-53", "quote-and-backslash-key"],
+)
+def test_valid_findings_without_reflected_credentials_succeed_for_escaped_keys(
+    deployment, monkeypatch, capsys, caplog, api_key
+):
+    engine, config = deployment
+    received, _ = install_wire(monkeypatch, expected_key=api_key)
+    key_config = config.model_copy(update={"gemini_api_key": SecretStr(api_key)})
+    with worker(key_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        assert response.status_code == 201, response.text
+        assert response.json()["findings"]
+        reloaded = read(client, workspace)
+        assert reloaded.status_code == 200, reloaded.text
+        assert reloaded.json()["findings"] == response.json()["findings"]
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    assert graph_counts(engine, workspace) == [1, 1, 1, 1, 0]
+    (row,) = attempts(engine, workspace)
+    assert row.status == "completed" and row.returned_model == MODEL
+    escaped_key = json.dumps(api_key)[1:-1]
+    for text_blob in (
+        response.text,
+        reloaded.text,
+        caplog.text,
+        capture.out,
+        capture.err,
+        str(vars(row)),
+    ):
+        assert api_key not in text_blob
+        assert escaped_key not in text_blob
 
 
 @pytest.mark.parametrize(
