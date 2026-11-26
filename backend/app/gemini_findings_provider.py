@@ -60,6 +60,19 @@ logger = logging.getLogger(__name__)
 class GeminiFindingsJsonSchema(FindingsProviderJsonSchema):
     """Project supported constraints onto the wire while keeping strict application validation."""
 
+    def field_title_should_be_set(self, schema) -> bool:
+        return False
+
+    def generate_inner(self, schema):
+        result = super().generate_inner(schema)
+        result.pop("title", None)
+        return result
+
+    def model_schema(self, schema):
+        result = super().model_schema(schema)
+        result.pop("title", None)
+        return result
+
     def str_schema(self, schema):
         result = super().str_schema(schema)
         result.pop("pattern", None)
@@ -73,8 +86,14 @@ class GeminiFindingsJsonSchema(FindingsProviderJsonSchema):
 
     def int_schema(self, schema):
         result = super().int_schema(schema)
-        if "exclusiveMaximum" in result:
-            result["maximum"] = result.pop("exclusiveMaximum") - 1
+        for keyword in ("minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum"):
+            result.pop(keyword, None)
+        return result
+
+    def list_schema(self, schema):
+        result = super().list_schema(schema)
+        result.pop("minItems", None)
+        result.pop("maxItems", None)
         return result
 
 
