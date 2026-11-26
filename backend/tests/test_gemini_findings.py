@@ -29,9 +29,16 @@ from test_openai_findings import cited_output
 from app import evidence, findings
 from app.config import GEMINI_FINDINGS_MODEL, Settings
 from app.database import build_engine
-from app.findings_provider import MockFindingsProvider
+from app.findings_provider import MockFindingsProvider, ProviderFailure
 from app.findings_schemas import FindingGenerationCreate, FindingGenerationOutput
-from app.gemini_findings_provider import build_gemini_provider, gemini_response_options
+from app.gemini_findings_provider import (
+    API_ORIGIN,
+    MAX_ERROR_BODY_BYTES,
+    build_gemini_provider,
+    gemini_response_options,
+    guard_request,
+    validate_response_encoding,
+)
 from app.main import create_app
 from app.models import AIGenerationRequest, WorkingDraft
 from app.visitor_sessions import get_clock
@@ -1663,3 +1670,572 @@ def test_replays_duplicate_case_and_preserves_partial_evidence(
             == "not_confirmed"
         )
         assert states["The customer's bank posted two debits."] == "inconclusive"
+
+
+@pytest.mark.parametrize(
+    "stage,http_status,upstream_status,api_code,retryable",
+    [
+        (GENERATE, 400, "INVALID_ARGUMENT", "AI_CONFIGURATION_ERROR", False),
+        (GENERATE, 401, "UNAUTHENTICATED", "AI_CONFIGURATION_ERROR", False),
+        (GENERATE, 403, "PERMISSION_DENIED", "AI_CONFIGURATION_ERROR", False),
+        (GENERATE, 404, "NOT_FOUND", "AI_CONFIGURATION_ERROR", False),
+        (GENERATE, 429, "RESOURCE_EXHAUSTED", "AI_PROVIDER_RATE_LIMITED", True),
+        (COUNT, 400, "INVALID_ARGUMENT", "AI_CONFIGURATION_ERROR", False),
+        (COUNT, 429, "RESOURCE_EXHAUSTED", "AI_PROVIDER_RATE_LIMITED", True),
+    ],
+)
+def test_upstream_http_diagnostics_log_allowlisted_status_without_leaking_secrets(
+    deployment,
+    monkeypatch,
+    capsys,
+    caplog,
+    stage,
+    http_status,
+    upstream_status,
+    api_code,
+    retryable,
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    secret_header = f"secret-header-{PRIVATE}"
+    handlers[stage] = lambda _: httpx2.Response(
+        http_status,
+        json={
+            "error": {
+                "code": http_status,
+                "message": f"Upstream error details {PRIVATE} {SYNTHETIC_AQ_KEY}",
+                "status": upstream_status,
+                "details": [{"reason": PRIVATE}],
+            }
+        },
+        headers={
+            "Set-Cookie": f"session={secret_header}; HttpOnly",
+            "X-Debug-Token": secret_header,
+        },
+    )
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 503, api_code, retryable)
+        assert [item.url.path for item in received] == (
+            [COUNT] if stage == COUNT else [COUNT, GENERATE]
+        )
+
+    capture = capsys.readouterr()
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == api_code
+    expected_operation = "count_tokens" if stage == COUNT else "generate_content"
+    diagnostic_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "app.gemini_findings_provider"
+    ]
+    assert diagnostic_lines == [
+        f"Gemini diagnostic: category=upstream_http_error operation={expected_operation} "
+        f"http_status={http_status} upstream_error_status={upstream_status}"
+    ]
+    for marker in (PRIVATE, SYNTHETIC_AQ_KEY, secret_header, "Upstream error details", "X-Debug"):
+        assert marker not in caplog.text
+        assert marker not in response.text
+        assert marker not in capture.out + capture.err
+        assert marker not in str(vars(row))
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        json.dumps(
+            {
+                "error": {
+                    "code": 400,
+                    "message": f"{PRIVATE} {SYNTHETIC_AQ_KEY}",
+                    "status": f"UNLISTED_{PRIVATE}_{SYNTHETIC_AQ_KEY}",
+                }
+            }
+        ).encode(),
+        json.dumps({"error": {"code": 400, "message": PRIVATE, "status": 400}}).encode(),
+        (
+            b'{"error":{"status":"INVALID_ARGUMENT","status":"NOT_FOUND","message":"'
+            + PRIVATE.encode()
+            + b'"}}'
+        ),
+        (
+            b'{"error":{"status":"INVALID_ARGUMENT","message":"'
+            + PRIVATE.encode()
+            + b" "
+            + (b"x" * 70000)
+            + b'"}}'
+        ),
+        (b'{"error":{"status":"INVALID_ARGUMENT","message":"' + PRIVATE.encode() + b' \xff"}}'),
+    ],
+    ids=[
+        "unknown-error-status",
+        "non-string-error-status",
+        "duplicate-error-status-keys",
+        "oversized-error-body",
+        "malformed-utf8-error-body",
+    ],
+)
+def test_upstream_http_diagnostics_omit_non_allowlisted_or_malformed_error_statuses(
+    deployment, monkeypatch, capsys, caplog, body
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    handlers[GENERATE] = lambda _: httpx2.Response(
+        400,
+        content=body,
+        headers={"content-type": "application/json", "X-Leak": PRIVATE},
+    )
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 503, "AI_CONFIGURATION_ERROR", False)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == "AI_CONFIGURATION_ERROR"
+    diagnostic_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "app.gemini_findings_provider"
+    ]
+    assert diagnostic_lines == [
+        "Gemini diagnostic: category=upstream_http_error operation=generate_content http_status=400"
+    ]
+    assert "upstream_error_status=" not in caplog.text
+    for marker in (PRIVATE, SYNTHETIC_AQ_KEY, "UNLISTED", "\ufffd", "X-Leak"):
+        assert marker not in caplog.text
+        assert marker not in response.text
+        assert marker not in capture.out + capture.err
+        assert marker not in str(vars(row))
+
+
+def test_model_version_mismatch_logs_diagnostic_without_leaking_model_or_body(
+    deployment, monkeypatch, capsys, caplog
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    mismatched_model = f"{MODEL}-canary-{PRIVATE}-{SYNTHETIC_AQ_KEY}"
+    output = cited_output()
+    output["findings"][0]["claim"] = f"Claim containing {PRIVATE}"
+    handlers[GENERATE] = lambda _: httpx2.Response(
+        200,
+        json=gemini_body(output=output, modelVersion=mismatched_model, responseId=PRIVATE),
+        headers={"Set-Cookie": f"vendor={PRIVATE}", "X-Model-Header": PRIVATE},
+    )
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 503, "AI_CONFIGURATION_ERROR", False)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == "AI_CONFIGURATION_ERROR"
+    assert row.returned_model is None and row.normalized_output is None
+    assert graph_counts(engine, workspace) == [0] * 5
+    diagnostic_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "app.gemini_findings_provider"
+    ]
+    assert diagnostic_lines == [
+        "Gemini diagnostic: category=model_version_mismatch "
+        "operation=generate_content http_status=200"
+    ]
+    for marker in (mismatched_model, PRIVATE, SYNTHETIC_AQ_KEY, "canary", "X-Model-Header"):
+        assert marker not in caplog.text
+        assert marker not in response.text
+        assert marker not in capture.out + capture.err
+        assert marker not in str(vars(row))
+
+
+@pytest.mark.parametrize(
+    "method,url,expected_reason",
+    [
+        ("GET", f"{API_ORIGIN}{GENERATE}", "unexpected_method"),
+        (
+            "POST",
+            f"{API_ORIGIN}{GENERATE}?key={SYNTHETIC_AQ_KEY}&note={PRIVATE}",
+            "unexpected_url",
+        ),
+        (
+            "POST",
+            f"https://unexpected.example.invalid/v1/models/{MODEL}:generateContent?token={PRIVATE}",
+            "unexpected_url",
+        ),
+    ],
+    ids=["unexpected-method", "unexpected-query-with-secret", "unexpected-origin"],
+)
+def test_local_request_guard_rejection_logs_category_without_url_or_secrets(
+    caplog, capsys, method, url, expected_reason
+):
+    request = httpx2.Request(
+        method,
+        url,
+        headers={
+            "x-goog-api-key": SYNTHETIC_AQ_KEY,
+            "cookie": f"session={PRIVATE}",
+        },
+        content=json.dumps({"sensitive_body": PRIVATE}).encode(),
+    )
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(ProviderFailure) as exc_info:
+            asyncio.run(guard_request(request))
+    assert exc_info.value.kind == "configuration"
+    capture = capsys.readouterr()
+    diagnostic_lines = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "app.gemini_findings_provider"
+    ]
+    assert diagnostic_lines == [
+        f"Gemini diagnostic: category=local_request_guard reason={expected_reason}"
+    ]
+    for marker in (
+        SYNTHETIC_AQ_KEY,
+        PRIVATE,
+        url,
+        "unexpected.example.invalid",
+        "x-goog-api-key",
+        "sensitive_body",
+        ":generateContent",
+    ):
+        assert marker not in caplog.text
+        assert marker not in capture.out + capture.err
+
+
+class ScriptedAsyncByteStream(httpx2.AsyncByteStream):
+    def __init__(self, chunks, *, fail_with: Exception | None = None):
+        self.chunks = list(chunks)
+        self.fail_with = fail_with
+        self.yielded = 0
+        self.closed = False
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            self.yielded += 1
+            yield chunk
+        if self.fail_with is not None:
+            raise self.fail_with
+
+    async def aclose(self):
+        self.closed = True
+
+
+def gemini_diagnostics(caplog):
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "app.gemini_findings_provider"
+    ]
+
+
+def test_upstream_error_stream_exact_65536_bytes_extracts_status_and_closes(
+    deployment, monkeypatch, capsys, caplog
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    prefix = (
+        f'{{"error":{{"status":"INVALID_ARGUMENT","message":"{PRIVATE} {SYNTHETIC_AQ_KEY} '
+    ).encode()
+    suffix = b'"}}'
+    pad_len = MAX_ERROR_BODY_BYTES - len(prefix) - len(suffix)
+    assert pad_len > 0
+    payload = prefix + (b"a" * pad_len) + suffix
+    assert len(payload) == MAX_ERROR_BODY_BYTES == 65536
+    stream = ScriptedAsyncByteStream([payload[:20000], payload[20000:45000], payload[45000:]])
+    handlers[GENERATE] = lambda _: httpx2.Response(
+        400,
+        stream=stream,
+        headers={"content-type": "application/json", "X-Secret": PRIVATE},
+    )
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 503, "AI_CONFIGURATION_ERROR", False)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    assert stream.closed and stream.yielded == 3
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == "AI_CONFIGURATION_ERROR"
+    assert gemini_diagnostics(caplog) == [
+        "Gemini diagnostic: category=upstream_http_error operation=generate_content "
+        "http_status=400 upstream_error_status=INVALID_ARGUMENT"
+    ]
+    for marker in (PRIVATE, SYNTHETIC_AQ_KEY, "X-Secret"):
+        assert marker not in caplog.text + response.text + capture.out + capture.err + str(
+            vars(row)
+        )
+
+
+def test_upstream_error_stream_over_limit_cuts_off_early_and_closes(
+    deployment, monkeypatch, capsys, caplog
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    prefix = (
+        f'{{"error":{{"status":"INVALID_ARGUMENT","message":"{PRIVATE} {SYNTHETIC_AQ_KEY} '
+    ).encode()
+    filler = b"x" * (MAX_ERROR_BODY_BYTES - len(prefix))
+    assert len(prefix) + len(filler) == MAX_ERROR_BODY_BYTES
+    stream = ScriptedAsyncByteStream(
+        [
+            prefix,
+            filler,
+            b"z",
+            b'trailing-sentinel-must-not-be-read"}}',
+        ]
+    )
+    handlers[GENERATE] = lambda _: httpx2.Response(
+        400,
+        stream=stream,
+        headers={"content-type": "application/json"},
+    )
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 503, "AI_CONFIGURATION_ERROR", False)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    assert stream.closed and stream.yielded == 3
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == "AI_CONFIGURATION_ERROR"
+    assert gemini_diagnostics(caplog) == [
+        "Gemini diagnostic: category=upstream_http_error operation=generate_content http_status=400"
+    ]
+    assert "upstream_error_status=" not in caplog.text
+    for marker in (PRIVATE, SYNTHETIC_AQ_KEY, "trailing-sentinel"):
+        assert marker not in caplog.text + response.text + capture.out + capture.err + str(
+            vars(row)
+        )
+
+
+def test_upstream_error_stream_with_split_utf8_decodes_safely(
+    deployment, monkeypatch, capsys, caplog
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    raw = json.dumps(
+        {
+            "error": {
+                "status": "PERMISSION_DENIED",
+                "message": f"Denied café € {PRIVATE} {SYNTHETIC_AQ_KEY}",
+            }
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    euro_pos = raw.index("€".encode())
+    split_at = euro_pos + 1  # Split inside the 3-byte UTF-8 sequence.
+    stream = ScriptedAsyncByteStream([raw[:split_at], raw[split_at:]])
+    handlers[GENERATE] = lambda _: httpx2.Response(403, stream=stream)
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 503, "AI_CONFIGURATION_ERROR", False)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    assert stream.closed
+    assert gemini_diagnostics(caplog) == [
+        "Gemini diagnostic: category=upstream_http_error operation=generate_content "
+        "http_status=403 upstream_error_status=PERMISSION_DENIED"
+    ]
+    for marker in (PRIVATE, SYNTHETIC_AQ_KEY, "Denied", "café"):
+        assert marker not in caplog.text + response.text + capture.out + capture.err
+
+
+@pytest.mark.parametrize(
+    "http_status,api_code,retryable",
+    [
+        (400, "AI_CONFIGURATION_ERROR", False),
+        (429, "AI_PROVIDER_RATE_LIMITED", True),
+    ],
+)
+def test_upstream_error_mid_stream_read_timeout_preserves_http_classification(
+    deployment, monkeypatch, capsys, caplog, http_status, api_code, retryable
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    stream = ScriptedAsyncByteStream(
+        [f'{{"error":{{"status":"INVALID_ARGUMENT","message":"{PRIVATE}'.encode()],
+        fail_with=httpx2.ReadTimeout(f"midstream-read-timeout-marker {PRIVATE}"),
+    )
+    handlers[GENERATE] = lambda _: httpx2.Response(http_status, stream=stream)
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 503, api_code, retryable)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    assert stream.closed
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == api_code
+    assert gemini_diagnostics(caplog) == [
+        f"Gemini diagnostic: category=upstream_http_error operation=generate_content "
+        f"http_status={http_status}"
+    ]
+    assert "upstream_error_status=" not in caplog.text
+    for marker in (PRIVATE, SYNTHETIC_AQ_KEY, "midstream-read-timeout-marker"):
+        assert marker not in caplog.text + response.text + capture.out + capture.err + str(
+            vars(row)
+        )
+
+
+def test_upstream_error_malformed_compression_preserves_http_classification(
+    deployment, monkeypatch, capsys, caplog
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    stream = ScriptedAsyncByteStream([b"\x1f\x8b\x08\x00corrupt-" + PRIVATE.encode()])
+    handlers[GENERATE] = lambda _: httpx2.Response(
+        403,
+        stream=stream,
+        headers={"Content-Encoding": "gzip", "X-Leak": PRIVATE},
+    )
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 503, "AI_CONFIGURATION_ERROR", False)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    assert stream.closed
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == "AI_CONFIGURATION_ERROR"
+    assert gemini_diagnostics(caplog) == [
+        "Gemini diagnostic: category=upstream_http_error operation=generate_content http_status=403"
+    ]
+    assert "upstream_error_status=" not in caplog.text
+    for marker in (PRIVATE, SYNTHETIC_AQ_KEY, "X-Leak"):
+        assert marker not in caplog.text + response.text + capture.out + capture.err + str(
+            vars(row)
+        )
+
+
+@pytest.mark.parametrize(
+    "lifecycle,http_status",
+    [
+        ("consumed-without-content", 404),
+        ("already-closed", 401),
+    ],
+)
+def test_upstream_error_stream_lifecycle_failures_preserve_http_classification(
+    deployment, monkeypatch, capsys, caplog, lifecycle, http_status
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+
+    async def respond(_):
+        stream = ScriptedAsyncByteStream(
+            [
+                json.dumps(
+                    {
+                        "error": {
+                            "status": "NOT_FOUND" if http_status == 404 else "UNAUTHENTICATED",
+                            "message": f"{PRIVATE} {SYNTHETIC_AQ_KEY}",
+                        }
+                    }
+                ).encode()
+            ]
+        )
+        resp = httpx2.Response(http_status, stream=stream)
+        if lifecycle == "consumed-without-content":
+            async for _ in resp.aiter_bytes():
+                pass
+            assert resp.is_stream_consumed
+        else:
+            await resp.aclose()
+            assert resp.is_closed
+        return resp
+
+    handlers[GENERATE] = respond
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 503, "AI_CONFIGURATION_ERROR", False)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == "AI_CONFIGURATION_ERROR"
+    assert gemini_diagnostics(caplog) == [
+        f"Gemini diagnostic: category=upstream_http_error operation=generate_content "
+        f"http_status={http_status}"
+    ]
+    assert "upstream_error_status=" not in caplog.text
+    for marker in (PRIVATE, SYNTHETIC_AQ_KEY):
+        assert marker not in caplog.text + response.text + capture.out + capture.err + str(
+            vars(row)
+        )
+
+
+@pytest.mark.parametrize("mode", ["valid-stream", "already-closed", "consumed-without-content"])
+def test_upstream_error_without_attached_request_preserves_http_classification(
+    caplog, capsys, mode
+):
+    stream = ScriptedAsyncByteStream(
+        [
+            json.dumps(
+                {
+                    "error": {
+                        "status": "INVALID_ARGUMENT",
+                        "message": f"{PRIVATE} {SYNTHETIC_AQ_KEY}",
+                    }
+                }
+            ).encode()
+        ]
+    )
+    resp = httpx2.Response(400, stream=stream)
+
+    async def check():
+        if mode == "already-closed":
+            await resp.aclose()
+        elif mode == "consumed-without-content":
+            async for _ in resp.aiter_bytes():
+                pass
+        with pytest.raises(ProviderFailure) as exc_info:
+            await validate_response_encoding(resp)
+        assert exc_info.value.kind == "configuration"
+
+    with caplog.at_level(logging.DEBUG):
+        asyncio.run(check())
+    capture = capsys.readouterr()
+    assert stream.closed
+    expected = "Gemini diagnostic: category=upstream_http_error operation=unknown http_status=400"
+    if mode == "valid-stream":
+        expected += " upstream_error_status=INVALID_ARGUMENT"
+    assert gemini_diagnostics(caplog) == [expected]
+    for marker in (PRIVATE, SYNTHETIC_AQ_KEY):
+        assert marker not in caplog.text + capture.out + capture.err
