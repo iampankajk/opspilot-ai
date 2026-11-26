@@ -1,5 +1,6 @@
 """Gemini Developer API wire contract for findings, with one count and one generation."""
 
+import contextlib
 import json
 import logging
 import re
@@ -32,6 +33,28 @@ RESPONSE_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 BLOCKED_PROMPTS = {"SAFETY", "OTHER", "BLOCKLIST", "PROHIBITED_CONTENT", "IMAGE_SAFETY"}
 REFUSAL_REASONS = {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}
 RETRY_OPTIONS = types.HttpRetryOptions(attempts=1)
+MAX_ERROR_BODY_BYTES = 65536
+UPSTREAM_ERROR_STATUSES = frozenset(
+    {
+        "ABORTED",
+        "ALREADY_EXISTS",
+        "CANCELLED",
+        "DATA_LOSS",
+        "DEADLINE_EXCEEDED",
+        "FAILED_PRECONDITION",
+        "INTERNAL",
+        "INVALID_ARGUMENT",
+        "NOT_FOUND",
+        "OUT_OF_RANGE",
+        "PERMISSION_DENIED",
+        "RESOURCE_EXHAUSTED",
+        "UNAUTHENTICATED",
+        "UNAVAILABLE",
+        "UNIMPLEMENTED",
+        "UNKNOWN",
+    }
+)
+logger = logging.getLogger(__name__)
 
 
 class GeminiFindingsJsonSchema(FindingsProviderJsonSchema):
@@ -79,11 +102,95 @@ def generation_request(bundle: dict) -> dict:
     }
 
 
+def response_request(response: httpx2.Response) -> httpx2.Request | None:
+    try:
+        return response.request
+    except RuntimeError:
+        return None
+
+
+def request_operation(request: httpx2.Request | None) -> str:
+    if request is None:
+        return "unknown"
+    path = request.url.path
+    if path == f"{MODEL_PATH}:countTokens":
+        return "count_tokens"
+    if path == f"{MODEL_PATH}:generateContent":
+        return "generate_content"
+    return "unknown"
+
+
+async def read_bounded_error_bytes(response: httpx2.Response) -> bytes | None:
+    try:
+        if response.is_stream_consumed:
+            return response.content if len(response.content) <= MAX_ERROR_BODY_BYTES else None
+        chunks = bytearray()
+        async with contextlib.aclosing(response.aiter_bytes()) as stream:
+            async for chunk in stream:
+                if len(chunks) + len(chunk) > MAX_ERROR_BODY_BYTES:
+                    return None
+                chunks.extend(chunk)
+        return bytes(chunks)
+    finally:
+        try:
+            await response.aclose()
+        except (httpx2.HTTPError, httpx2.StreamError):
+            pass
+
+
+async def extract_upstream_error_status(response: httpx2.Response) -> str | None:
+    try:
+        raw_bytes = await read_bounded_error_bytes(response)
+        if raw_bytes is None:
+            return None
+        text = raw_bytes.decode("utf-8", errors="strict")
+        payload = json.loads(
+            text,
+            object_pairs_hook=mark_duplicate_json_fields,
+            parse_constant=reject_non_json_constant,
+        )
+    except (
+        UnicodeDecodeError,
+        ValueError,
+        RecursionError,
+        httpx2.HTTPError,
+        httpx2.StreamError,
+    ):
+        return None
+    if not isinstance(payload, dict) or has_duplicate_json_field(payload):
+        return None
+    error = payload.get("error")
+    if not isinstance(error, dict):
+        return None
+    status = error.get("status")
+    if type(status) is str and status in UPSTREAM_ERROR_STATUSES:
+        return status
+    return None
+
+
+async def log_upstream_http_error(response: httpx2.Response) -> None:
+    operation = request_operation(response_request(response))
+    status_code = response.status_code
+    http_status = status_code if type(status_code) is int and 100 <= status_code <= 599 else None
+    upstream_status = await extract_upstream_error_status(response)
+    fields = ["category=upstream_http_error", f"operation={operation}"]
+    if http_status is not None:
+        fields.append(f"http_status={http_status}")
+    if upstream_status is not None:
+        fields.append(f"upstream_error_status={upstream_status}")
+    logger.warning("Gemini diagnostic: %s", " ".join(fields))
+
+
 async def guard_request(request: httpx2.Request) -> None:
     if request.method != "POST" or str(request.url) not in {
         f"{API_ORIGIN}{MODEL_PATH}:countTokens",
         f"{API_ORIGIN}{MODEL_PATH}:generateContent",
     }:
+        reason = "unexpected_method" if request.method != "POST" else "unexpected_url"
+        logger.warning(
+            "Gemini diagnostic: category=local_request_guard reason=%s",
+            reason,
+        )
         raise ProviderFailure("configuration")
     request.headers.pop("cookie", None)
     request.headers.pop("cookie2", None)
@@ -91,6 +198,7 @@ async def guard_request(request: httpx2.Request) -> None:
 
 async def validate_response_encoding(response: httpx2.Response) -> None:
     if response.status_code != 200:
+        await log_upstream_http_error(response)
         # Classify HTTP errors before the SDK reads or JSON-decodes an untrusted error body.
         raise http_failure(response.status_code)
     # The SDK's raw result holds text. Check the original bytes before it reads response.text.
@@ -335,6 +443,10 @@ class GeminiFindingsProvider:
         if model is not None and not isinstance(model, str):
             raise ProviderFailure("invalid")
         if model is not None and model != GEMINI_FINDINGS_MODEL:
+            logger.warning(
+                "Gemini diagnostic: category=model_version_mismatch "
+                "operation=generate_content http_status=200"
+            )
             raise ProviderFailure("configuration")
         if status == "completed" and model is None:
             raise ProviderFailure("invalid")
