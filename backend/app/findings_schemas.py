@@ -22,7 +22,7 @@ from app.workspace_schemas import LocalID, Schema, ThreadKind
 QuerySource = Literal["internal_payments", "stripe", "loki", "tempo", "zendesk", "support_lookup"]
 ProposalStatus = Literal["confirmed", "not_confirmed", "inconclusive"]
 GenerationStatus = Literal["pending", "completed", "failed", "interrupted", "stale"]
-ProviderName = Literal["mock", "openai"]
+ProviderName = Literal["mock", "openai", "gemini"]
 
 
 def storable_text(value: str) -> str:

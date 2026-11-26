@@ -6,7 +6,8 @@ Task 1 implements only migration boundary 001 from System Architecture §4.5. Ta
 the validated fixture catalog, and [owned workspace initialization/retrieval](INVESTIGATION_WORKSPACES.md).
 Task 4A adds migration 003 and [case/evidence persistence with thread-scoped listing](CASE_PERSISTENCE.md).
 Task 4B adds migration 004 and [bounded evidence inspection/request history](EVIDENCE_RETRIEVAL.md).
-AI, findings/reviews, numbered revisions, refresh, and export remain deferred.
+Task 5A adds migration 005 and backend findings. Frontend Findings, reviews, numbered revisions,
+refresh, and export remain deferred.
 
 ## Prerequisites and structure
 
@@ -68,17 +69,34 @@ Apply the schema deliberately, from `backend/`:
 .venv/bin/alembic check
 ```
 
-Current expected head: `0004_evidence_history`. Stage 001 creates `visitor_contexts`,
+The expected head is `0005_ai_findings`. Stage 001 creates `visitor_contexts`,
 `dataset_versions`, `incidents`, and `investigations`; stage 002 adds `investigation_states`,
 `working_drafts`, `thread_states`, and `state_sources`; stage 003 adds `evidence_records`,
 `payment_cases`, `case_threads`, `case_evidence_links`, and `evidence_relationships`; stage 004 adds
-`evidence_requests`, `request_sources`, `retrieval_results`, and `retrieval_result_records`. There are
-17 domain tables plus Alembic's bookkeeping. Schema
+`evidence_requests`, `request_sources`, `retrieval_results`, and `retrieval_result_records`. Stage 005
+adds six findings tables, including `ai_generation_requests`. There are 23 domain tables plus
+Alembic's bookkeeping. Schema
 migrations import no fixture payloads. Startup validates the explicitly configured
 `CURRENT_DATASET_VERSION` (default approved label `synthetic-payments-v0.1`) and registers its
 immutable catalog identities idempotently. A missing/mismatched fixture fails visibly.
 Application startup never runs `create_all` or migrations. Do not execute a destructive
 downgrade against stored work without impact review and explicit approval.
+
+## Backend Findings providers
+
+Findings start disabled (`AI_FINDINGS_ENABLED=false`). Enabling Findings with the default
+`AI_FINDINGS_PROVIDER=mock` uses the deterministic offline adapter. The `openai` selection
+uses `AI_FINDINGS_MODEL` and the server-only `OPENAI_API_KEY`. The `gemini` selection uses the
+allowlisted `AI_FINDINGS_GEMINI_MODEL=gemini-3.5-flash-lite` and the server-only `GEMINI_API_KEY`.
+The pinned SDK is installed by the same backend dependency command above. Keep credentials in
+the backend environment. The test suite uses dummy headers and intercepts provider requests.
+
+Gemini admission uses the database that all backend workers share. An admitted start counts even
+if token counting fails or the backend stops before dispatch. The policy allows five starts
+per rolling 24 hours, at most one per rolling minute, and at most one unexpired pending attempt.
+The Free tariff estimate is $0.00 and the history's actual Gemini cost is unknown. Live checks
+require separate authorization and verification of the dedicated Google project's Free tier,
+absence of active billing linkage, model access, and quotas. [Gemini findings design](GEMINI_FINDINGS_PROVIDER.md)
 
 ## Run locally
 

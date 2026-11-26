@@ -2,12 +2,12 @@
 
 import json
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Literal, Never, Protocol
 
 from app.findings_schemas import ProviderName
 from app.findings_validation import returned_records
 
-TokenCountKind = Literal["mock_estimate", "openai_input_tokens"]
+TokenCountKind = Literal["mock_estimate", "openai_input_tokens", "gemini_count_tokens"]
 ProviderStatus = Literal["completed", "refused", "incomplete", "invalid", "failed", "configuration"]
 
 
@@ -44,6 +44,45 @@ class FindingsProvider(Protocol):
     async def count_input(self, bundle: dict, *, timeout: float) -> InputCount: ...
 
     async def generate(self, bundle: dict, *, timeout: float) -> ProviderResult: ...
+
+
+_DUPLICATE_JSON_FIELD = object()
+
+
+def evidence_message(bundle: dict) -> str:
+    data = json.dumps(
+        {"context": bundle["context"], "evidence": bundle["evidence"]}, sort_keys=True
+    )
+    return f"Selected synthetic case evidence (JSON):\n{data}"
+
+
+def is_token_count(value: object) -> bool:
+    return type(value) is int and 0 <= value <= 2_147_483_647
+
+
+def mark_duplicate_json_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    # Keep each duplicate at its original location without choosing either value.
+    fields = {}
+    for key, value in pairs:
+        fields[key] = _DUPLICATE_JSON_FIELD if key in fields else value
+    return fields
+
+
+def has_duplicate_json_field(value: object) -> bool:
+    pending = [value]
+    while pending:
+        item = pending.pop()
+        if item is _DUPLICATE_JSON_FIELD:
+            return True
+        if isinstance(item, dict):
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+    return False
+
+
+def reject_non_json_constant(_: str) -> Never:
+    raise ValueError("Invalid JSON numeric literal")
 
 
 def citation(record, field, role="context"):
