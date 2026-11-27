@@ -18,6 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
+from app.actor_auth import CurrentActor
 from app.api_errors import APIError
 from app.config import FINDINGS_PUBLICATION_RESERVE_SECONDS, GEMINI_FINDINGS_MODEL
 from app.evidence import (
@@ -58,7 +59,7 @@ from app.models import (
     Finding,
     FindingCase,
 )
-from app.visitor_sessions import Clock, CurrentVisitor, authenticate, get_clock, get_session_token
+from app.visitor_sessions import Clock, authenticate, get_clock, get_session_token
 from app.workspace_schemas import LocalID, ThreadKind
 
 router = APIRouter(prefix="/api/v1")
@@ -252,12 +253,27 @@ def gemini_admission_time(db):
 
 
 def start(request, investigation_id, thread, case, payload, clock):
-    reconcile_owned(request, investigation_id, payload.state_id, thread, case, clock)
+    reconcile_owned(
+        request,
+        investigation_id,
+        payload.state_id,
+        thread,
+        case,
+        clock,
+        allowed_roles=("engineer",),
+    )
     settings = request.app.state.settings
     with Session(request.app.state.engine) as db, db.begin():
         if settings.ai_findings_provider == "gemini":
             db.connection(execution_options={"isolation_level": "READ COMMITTED"})
-        draft = owned_draft(db, request, investigation_id, clock, payload.state_id)
+        draft = owned_draft(
+            db,
+            request,
+            investigation_id,
+            clock,
+            payload.state_id,
+            allowed_roles=("engineer",),
+        )
         check_case(db, draft, thread, case)
         provider = configured_provider(request)
         if draft.draft_version != payload.expected_draft_version:
@@ -360,7 +376,13 @@ def start(request, investigation_id, thread, case, payload, clock):
 
 
 def fenced_operation(db, request, attempt, clock):
-    draft = owned_draft(db, request, attempt.investigation_id, clock)
+    draft = owned_draft(
+        db,
+        request,
+        attempt.investigation_id,
+        clock,
+        allowed_roles=("engineer",),
+    )
     if draft.state_id != attempt.state_id:
         raise conflict("STALE_STATE", draft)
     check_case(db, draft, attempt.thread, attempt.case)
@@ -799,7 +821,7 @@ async def generate_findings(
     case_id: LocalID,
     payload: FindingGenerationCreate,
     request: Request,
-    visitor: CurrentVisitor,
+    actor: CurrentActor,
     clock: Annotated[Clock, Depends(get_clock)],
 ):
     if request.query_params:
@@ -881,7 +903,7 @@ def stored_findings(
     case_id: LocalID,
     query: Annotated[FindingsQuery, Query()],
     request: Request,
-    visitor: CurrentVisitor,
+    actor: CurrentActor,
     clock: Annotated[Clock, Depends(get_clock)],
 ):
     with Session(request.app.state.engine) as db, db.begin():

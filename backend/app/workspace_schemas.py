@@ -144,3 +144,23 @@ class CaseList(Schema):
 
 class CaseListQuery(Schema):
     state_id: UUID
+
+
+class InvestigationSummary(Schema):
+    investigation_id: UUID
+    incident_id: UUID
+    incident_ref: LocalID
+    state_id: UUID
+    draft_version: int = Field(ge=0)
+    created_at: datetime
+
+    @field_validator("created_at")
+    @classmethod
+    def utc_created_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("Timestamps require a timezone")
+        return value.astimezone(UTC)
+
+
+class InvestigationList(Schema):
+    investigations: list[InvestigationSummary]

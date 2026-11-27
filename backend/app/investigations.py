@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.actor_auth import CurrentActor, authenticate_actor, authorize_role
 from app.api_errors import APIError
 from app.catalog import SourceCoverage
 from app.evidence import reconcile_overdue
@@ -14,6 +15,7 @@ from app.materialization import materialize_state
 from app.models import (
     CaseThread,
     DatasetVersion,
+    Incident,
     Investigation,
     InvestigationState,
     PaymentCase,
@@ -21,7 +23,7 @@ from app.models import (
     ThreadState,
     WorkingDraft,
 )
-from app.visitor_sessions import Clock, CurrentVisitor, authenticate, get_clock, get_session_token
+from app.visitor_sessions import Clock, get_clock, get_session_token
 from app.workspace_schemas import (
     CaseList,
     CaseListQuery,
@@ -30,6 +32,8 @@ from app.workspace_schemas import (
     IncidentContext,
     IncidentEntry,
     InvestigationCreate,
+    InvestigationList,
+    InvestigationSummary,
     LocalID,
     Money,
     ThreadKind,
@@ -159,7 +163,7 @@ def checked_view(
     materialize_state(db, investigation.investigation_id)
     reconcile_overdue(db, db.get(WorkingDraft, investigation.investigation_id), clock)
     result = workspace_view(db, investigation)
-    actor = authenticate(db, get_session_token(request), clock)
+    actor = authenticate_actor(db, get_session_token(request), clock)
     if actor.visitor_context_id != investigation.visitor_context_id:
         raise not_found()
     return result
@@ -168,7 +172,8 @@ def checked_view(
 def create_or_resume(request: Request, incident_id: UUID, clock: Clock) -> tuple[Workspace, bool]:
     try:
         with Session(request.app.state.engine) as db, db.begin():
-            actor = authenticate(db, get_session_token(request), clock)
+            actor = authenticate_actor(db, get_session_token(request), clock)
+            authorize_role(actor, "engineer")
             existing = db.scalar(
                 select(Investigation)
                 .where(
@@ -197,7 +202,8 @@ def create_or_resume(request: Request, incident_id: UUID, clock: Clock) -> tuple
             raise
         # The losing graph is rolled back. Read the committed winner in a fresh transaction.
         with Session(request.app.state.engine) as db, db.begin():
-            actor = authenticate(db, get_session_token(request), clock)
+            actor = authenticate_actor(db, get_session_token(request), clock)
+            authorize_role(actor, "engineer")
             winner = db.scalar(
                 select(Investigation)
                 .where(
@@ -212,12 +218,54 @@ def create_or_resume(request: Request, incident_id: UUID, clock: Clock) -> tuple
 
 
 @router.get("/incidents/{incident_ref}", response_model=IncidentEntry)
-def incident_entry(incident_ref: LocalID, request: Request, visitor: CurrentVisitor):
+def incident_entry(incident_ref: LocalID, request: Request, actor: CurrentActor):
     no_query_overrides(request)
     catalog = current_catalog(request)
     if catalog.incident.incident_ref != incident_ref:
         raise not_found()
     return catalog
+
+
+@router.get("/investigations", response_model=InvestigationList)
+def list_investigations(
+    request: Request,
+    actor: CurrentActor,
+    clock: Annotated[Clock, Depends(get_clock)],
+):
+    no_query_overrides(request)
+    with Session(request.app.state.engine) as db, db.begin():
+        authed = authenticate_actor(db, get_session_token(request), clock)
+        rows = db.execute(
+            select(
+                Investigation.investigation_id,
+                Investigation.incident_id,
+                Incident.source_incident_reference.label("incident_ref"),
+                WorkingDraft.state_id,
+                WorkingDraft.draft_version,
+                Investigation.created_at,
+            )
+            .join(Incident, Incident.incident_id == Investigation.incident_id)
+            .join(WorkingDraft, WorkingDraft.investigation_id == Investigation.investigation_id)
+            .where(Investigation.visitor_context_id == authed.visitor_context_id)
+            .order_by(Investigation.created_at.desc(), Investigation.investigation_id)
+        ).all()
+        result = InvestigationList(
+            investigations=[
+                InvestigationSummary(
+                    investigation_id=row.investigation_id,
+                    incident_id=row.incident_id,
+                    incident_ref=row.incident_ref,
+                    state_id=row.state_id,
+                    draft_version=row.draft_version,
+                    created_at=row.created_at,
+                )
+                for row in rows
+            ]
+        )
+        rechecked = authenticate_actor(db, get_session_token(request), clock)
+        if rechecked.visitor_context_id != authed.visitor_context_id:
+            raise not_found()
+        return result
 
 
 @router.post(
@@ -230,10 +278,11 @@ def investigation_create(
     payload: InvestigationCreate,
     request: Request,
     response: Response,
-    visitor: CurrentVisitor,
+    actor: CurrentActor,
     clock: Annotated[Clock, Depends(get_clock)],
 ):
     no_query_overrides(request)
+    authorize_role(actor, "engineer")
     try:
         result, created = create_or_resume(request, payload.incident_id, clock)
     except (RuntimeError, ValueError, KeyError) as exc:
@@ -251,7 +300,7 @@ def investigation_create(
 def investigation_workspace(
     investigation_id: UUID,
     request: Request,
-    visitor: CurrentVisitor,
+    actor: CurrentActor,
     clock: Annotated[Clock, Depends(get_clock)],
 ):
     no_query_overrides(request)
@@ -260,7 +309,7 @@ def investigation_workspace(
             select(Investigation)
             .where(
                 Investigation.investigation_id == investigation_id,
-                Investigation.visitor_context_id == visitor.visitor_context_id,
+                Investigation.visitor_context_id == actor.visitor_context_id,
             )
             .with_for_update()
         )
@@ -277,7 +326,7 @@ def thread_cases(
     thread_kind: ThreadKind,
     query: Annotated[CaseListQuery, Query()],
     request: Request,
-    visitor: CurrentVisitor,
+    actor: CurrentActor,
     clock: Annotated[Clock, Depends(get_clock)],
 ):
     with Session(request.app.state.engine) as db, db.begin():
@@ -285,7 +334,7 @@ def thread_cases(
             select(Investigation)
             .where(
                 Investigation.investigation_id == investigation_id,
-                Investigation.visitor_context_id == visitor.visitor_context_id,
+                Investigation.visitor_context_id == actor.visitor_context_id,
             )
             .with_for_update()
         )
@@ -339,7 +388,7 @@ def thread_cases(
                 for case in cases
             ],
         )
-        actor = authenticate(db, get_session_token(request), clock)
-        if actor.visitor_context_id != investigation.visitor_context_id:
+        rechecked = authenticate_actor(db, get_session_token(request), clock)
+        if rechecked.visitor_context_id != investigation.visitor_context_id:
             raise not_found()
         return result
