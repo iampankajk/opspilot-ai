@@ -1,8 +1,10 @@
+import logging
+from unittest.mock import AsyncMock, Mock, call
 from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, SecretStr
 
 from app.config import Settings
 from app.main import create_app
@@ -34,6 +36,102 @@ def test_health_contract_has_no_identity_or_cache(client, monkeypatch):
     UUID(response.headers["X-Request-ID"])
     assert response.headers["Cache-Control"] == "no-store"
     assert "set-cookie" not in response.headers
+
+
+@pytest.fixture
+def startup_diagnostics(monkeypatch, caplog):
+    engine = Mock()
+    catalog = Mock(return_value=None)
+    monkeypatch.setattr("app.main.build_engine", Mock(return_value=engine))
+    monkeypatch.setattr("app.main.initialize_catalog", catalog)
+    with caplog.at_level(logging.INFO, logger="uvicorn.error"):
+        yield engine, catalog
+
+
+@pytest.mark.parametrize(
+    "overrides,provider,ready",
+    [
+        ({"ai_findings_provider": "gemini"}, "gemini", True),
+        ({"ai_findings_provider": "gemini"}, "gemini", False),
+        ({"ai_findings_provider": "openai"}, "openai", True),
+        ({"ai_findings_provider": "openai"}, "openai", False),
+        ({}, "mock", True),
+        ({"ai_findings_provider": "gemini", "ai_findings_enabled": False}, "disabled", False),
+        (
+            {"ai_findings_provider": "gemini", "ai_findings_gemini_model": "private-model-marker"},
+            "unsupported",
+            False,
+        ),
+        ({"ai_findings_provider": "private-provider-marker"}, "unsupported", False),
+    ],
+    ids=[
+        "gemini-ready",
+        "gemini-unavailable",
+        "openai-ready",
+        "openai-unavailable",
+        "mock-ready",
+        "disabled",
+        "unsupported-model",
+        "unsupported-provider",
+    ],
+)
+def test_findings_adapter_startup_diagnostic(
+    overrides, provider, ready, startup_diagnostics, monkeypatch, caplog
+):
+    engine, catalog = startup_diagnostics
+    test_key = SecretStr("synthetic-startup-key-marker")
+    settings = Settings(
+        database_url="postgresql+psycopg://localhost/unused",
+        ai_findings_enabled=True,
+        gemini_api_key=test_key,
+        openai_api_key=test_key,
+    ).model_copy(update=overrides)
+    adapter = Mock(close=AsyncMock())
+    gemini = AsyncMock(return_value=adapter if ready else None)
+    openai = Mock(return_value=adapter if ready else None)
+    monkeypatch.setattr("app.main.build_gemini_provider", gemini)
+    monkeypatch.setattr("app.main.build_openai_provider", openai)
+
+    app = create_app(settings)
+    with TestClient(app):
+        assert (app.state.findings_provider is not None) == ready
+
+    expected_gemini = [call(test_key)] if provider == "gemini" else []
+    assert gemini.call_args_list == gemini.await_args_list == expected_gemini
+    assert openai.call_args_list == ([call(test_key)] if provider == "openai" else [])
+    assert adapter.close.await_count == int(ready and provider in {"gemini", "openai"})
+    catalog.assert_called_once()
+    engine.dispose.assert_called_once_with()
+    records = [record for record in caplog.records if record.name == "uvicorn.error.opspilot"]
+    assert len(records) == 1
+    assert records[0].getMessage() == (
+        f"ai_findings_adapter_startup provider={provider} ready={str(ready).lower()}"
+    )
+    assert records[0].exc_info is None
+
+
+def test_findings_adapter_startup_error_propagates_without_logging_exception(
+    startup_diagnostics, monkeypatch, caplog
+):
+    engine, catalog = startup_diagnostics
+    failure = RuntimeError("synthetic-private-startup-error")
+    monkeypatch.setattr("app.main.build_gemini_provider", AsyncMock(side_effect=failure))
+    settings = Settings(
+        database_url="postgresql+psycopg://localhost/unused",
+        ai_findings_enabled=True,
+        ai_findings_provider="gemini",
+    )
+
+    with pytest.raises(RuntimeError) as error, TestClient(create_app(settings)):
+        pass
+
+    assert error.value is failure
+    records = [record for record in caplog.records if record.name == "uvicorn.error.opspilot"]
+    assert len(records) == 1
+    assert records[0].getMessage() == "ai_findings_adapter_startup provider=gemini ready=false"
+    assert records[0].exc_info is None
+    catalog.assert_not_called()
+    engine.dispose.assert_called_once_with()
 
 
 @pytest.mark.parametrize("code", ["DATABASE_UNAVAILABLE", "SCHEMA_NOT_READY"])

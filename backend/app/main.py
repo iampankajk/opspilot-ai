@@ -25,6 +25,8 @@ from app.visitor_sessions import clear_session_cookie
 from app.visitor_sessions import router as visitor_router
 
 logger = logging.getLogger(__name__)
+# Use the server's startup log level and handlers for this lifecycle event.
+startup_logger = logging.getLogger("uvicorn.error.opspilot")
 
 
 class HealthResponse(BaseModel):
@@ -70,15 +72,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         live_provider = None
         app.state.findings_provider = None
         try:
-            if config.ai_findings_enabled and supported_provider_model(config):
-                if config.ai_findings_provider == "mock":
-                    app.state.findings_provider = MockFindingsProvider()
-                elif config.ai_findings_provider == "openai":
-                    live_provider = build_openai_provider(config.openai_api_key)
-                    app.state.findings_provider = live_provider
-                elif config.ai_findings_provider == "gemini":
-                    live_provider = await build_gemini_provider(config.gemini_api_key)
-                    app.state.findings_provider = live_provider
+            provider_name = "unsupported" if config.ai_findings_enabled else "disabled"
+            try:
+                if config.ai_findings_enabled and supported_provider_model(config):
+                    if config.ai_findings_provider == "mock":
+                        provider_name = "mock"
+                        app.state.findings_provider = MockFindingsProvider()
+                    elif config.ai_findings_provider == "openai":
+                        provider_name = "openai"
+                        live_provider = build_openai_provider(config.openai_api_key)
+                        app.state.findings_provider = live_provider
+                    elif config.ai_findings_provider == "gemini":
+                        provider_name = "gemini"
+                        live_provider = await build_gemini_provider(config.gemini_api_key)
+                        app.state.findings_provider = live_provider
+            finally:
+                startup_logger.info(
+                    "ai_findings_adapter_startup provider=%s ready=%s",
+                    provider_name,
+                    "true" if app.state.findings_provider is not None else "false",
+                )
             app.state.catalog = None
             app.state.catalog_error = None
             try:
