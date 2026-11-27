@@ -91,9 +91,15 @@ Validation plan: the Blueprint's UX-R criteria cover the five views, both seeded
 |---|---|---|---|---|---|
 | D-036 | 2026-11-25 | Add an opt-in Gemini provider using `gemini-3.5-flash-lite`, `MINIMAL` thinking, full-request token-count preflight, and at most five admitted starts per rolling 24 hours. Preserve mock and OpenAI, with zero automatic retries or provider fallback. | Owner approved the provider architecture and requested a restart-safe limit. The [Gemini design record](GEMINI_FINDINGS_PROVIDER.md#41-durable-gemini-admission) specifies durable counting through existing generation-attempt rows and a short PostgreSQL transaction lock. | Keep Gemini disabled by default. Verify the design offline before any separately authorized live calls. Google quotas and billing are checked separately, and claims require evidence-based human review. This is design approval. | Accepted |
 
+## Approved Human Findings Review identity and authorization
+
+| ID | Date | Decision | Context / alternatives | Consequences | Status |
+|---|---|---|---|---|---|
+| D-037 | 2026-11-27 | Decouple shared workspace isolation (`visitor_contexts`) from workspace-scoped fictional actor identities (`workspace_actors`: `engineer` and `lead`) and server-verified sessions (`actor_sessions`) using opaque SHA-256-hashed HttpOnly cookies and one-time workspace-creation access codes. | Rejected client-supplied role headers/in-session role switching (privilege escalation) and full password/OIDC accounts (exceeds MVP scope and D-019). See [ADR-037](decisions/ADR-037-engineer-lead-identity-and-shared-workspace-authorization.md). | Both roles access the same investigation while preserving cross-workspace `404` isolation and strict `401`/`403`/`404` boundaries. Engineer sessions cannot obtain or mint Lead credentials; legacy `/visitor-session` grants `engineer` access only; one-time credentials are never exposed via ordinary APIs or logs. Fictional MVP auth is not production-grade identity management. Task 6A is backend-only (migration `0006_actor_auth`). | Accepted |
+
 ## Historical review label crosswalk
 
-Former D1–D13 labels were local to the design review, not alternatives to existing D-001–D-013. For example, review D12 resolves D-004; it is not canonical D-012. These aliases remain here for traceability only. Use canonical IDs in future documentation. The next unused canonical ID is D-037.
+Former D1–D13 labels were local to the design review, not alternatives to existing D-001–D-013. For example, review D12 resolves D-004; it is not canonical D-012. These aliases remain here for traceability only. Use canonical IDs in future documentation. The next unused canonical ID is D-038.
 
 | Former review label | Canonical decision ID | Topic |
 |---|---|---|
