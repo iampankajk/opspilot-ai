@@ -48,7 +48,77 @@ class VisitorContext(Base):
 
     visitor_context_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    session_token_hash: Mapped[bytes | None] = mapped_column(LargeBinary, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class WorkspaceActor(Base):
+    __tablename__ = "workspace_actors"
+    __table_args__ = (
+        CheckConstraint("actor_ref ~ '^[a-z0-9][a-z0-9._-]{1,63}$'", name="actor_ref"),
+        CheckConstraint(
+            "btrim(display_name) <> '' AND length(display_name) <= 120",
+            name="display_name",
+        ),
+        CheckConstraint("role IN ('engineer', 'lead')", name="role"),
+        CheckConstraint(
+            "access_code_hash IS NULL OR octet_length(access_code_hash) = 32",
+            name="access_code_hash_length",
+        ),
+        CheckConstraint(
+            "disabled_at IS NULL OR disabled_at >= created_at",
+            name="disabled_after_creation",
+        ),
+        UniqueConstraint(
+            "visitor_context_id", "actor_ref", name="uq_workspace_actors_workspace_ref"
+        ),
+        UniqueConstraint(
+            "visitor_context_id", "actor_id", name="uq_workspace_actors_workspace_actor"
+        ),
+        UniqueConstraint("actor_id", "role", name="uq_workspace_actors_actor_role"),
+        Index(
+            "uq_workspace_actors_access_code_hash",
+            "access_code_hash",
+            unique=True,
+            postgresql_where=text("access_code_hash IS NOT NULL"),
+        ),
+    )
+
+    actor_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    visitor_context_id: Mapped[UUID] = mapped_column(
+        ForeignKey("visitor_contexts.visitor_context_id", ondelete="RESTRICT"), index=True
+    )
+    actor_ref: Mapped[str] = mapped_column(Text)
+    display_name: Mapped[str] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(Text)
+    access_code_hash: Mapped[bytes | None] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    disabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ActorSession(Base):
+    __tablename__ = "actor_sessions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["visitor_context_id", "actor_id"],
+            ["workspace_actors.visitor_context_id", "workspace_actors.actor_id"],
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint("octet_length(session_token_hash) = 32", name="token_hash_length"),
+        CheckConstraint("expires_at > created_at", name="expiry_after_creation"),
+        CheckConstraint(
+            "invalidated_at IS NULL OR invalidated_at >= created_at",
+            name="invalidation_after_creation",
+        ),
+        Index("ix_actor_sessions_workspace_actor", "visitor_context_id", "actor_id"),
+    )
+
+    session_id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    visitor_context_id: Mapped[UUID] = mapped_column()
+    actor_id: Mapped[UUID] = mapped_column()
     session_token_hash: Mapped[bytes] = mapped_column(LargeBinary, unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     invalidated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

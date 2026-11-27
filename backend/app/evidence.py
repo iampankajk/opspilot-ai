@@ -10,6 +10,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.actor_auth import ActorRole, CurrentActor, authenticate_actor, authorize_role
 from app.api_errors import APIError
 from app.catalog import canonical_digest
 from app.evidence_schemas import (
@@ -39,7 +40,7 @@ from app.models import (
     StateSource,
     WorkingDraft,
 )
-from app.visitor_sessions import Clock, CurrentVisitor, authenticate, get_clock, get_session_token
+from app.visitor_sessions import Clock, get_clock, get_session_token
 from app.workspace_schemas import AssociationBasis, LocalID, ThreadKind
 
 router = APIRouter(prefix="/api/v1")
@@ -66,8 +67,16 @@ def conflict(code, draft):
     )
 
 
-def owned_draft(db, request, investigation_id, clock, state_id=None):
-    actor = authenticate(db, get_session_token(request), clock)
+def owned_draft(
+    db,
+    request,
+    investigation_id,
+    clock,
+    state_id=None,
+    *,
+    allowed_roles: tuple[ActorRole, ...] | None = None,
+):
+    actor = authenticate_actor(db, get_session_token(request), clock)
     investigation = db.scalar(
         select(Investigation)
         .where(
@@ -78,6 +87,8 @@ def owned_draft(db, request, investigation_id, clock, state_id=None):
     )
     if investigation is None:
         raise APIError(404, "NOT_FOUND", "Resource not found.")
+    if allowed_roles is not None:
+        authorize_role(actor, *allowed_roles)
     draft = db.get(WorkingDraft, investigation_id)
     if draft is None:
         raise failure()
@@ -129,13 +140,24 @@ def reconcile_overdue(db, draft, clock):
     return bool(overdue) or recovered_generations
 
 
-def reconcile_owned(request, investigation_id, state_id, thread, case, clock):
+def reconcile_owned(
+    request,
+    investigation_id,
+    state_id,
+    thread,
+    case,
+    clock,
+    *,
+    allowed_roles: tuple[ActorRole, ...] | None = None,
+):
     # Independent commit: a subsequent stale-version rejection cannot undo recovery.
     with Session(request.app.state.engine) as db, db.begin():
-        draft = owned_draft(db, request, investigation_id, clock, state_id)
+        draft = owned_draft(
+            db, request, investigation_id, clock, state_id, allowed_roles=allowed_roles
+        )
         check_case(db, draft, thread, case)
         reconcile_overdue(db, draft, clock)
-        authenticate(db, get_session_token(request), clock)
+        authenticate_actor(db, get_session_token(request), clock)
 
 
 def start(request, investigation_id, thread, case, payload, clock):
@@ -238,7 +260,7 @@ def start(request, investigation_id, thread, case, payload, clock):
             )
         advance(draft, clock)
         db.flush()
-        authenticate(db, get_session_token(request), clock)
+        authenticate_actor(db, get_session_token(request), clock)
         return request_id, draft.draft_version, criteria, sources, inventory, end
 
 
@@ -491,7 +513,7 @@ def finalize(
                     relationships=relationships,
                 )
         # Authentication is repeated after row-lock waits and writes, before commit.
-        authenticate(db, get_session_token(request), clock)
+        authenticate_actor(db, get_session_token(request), clock)
     if rejected:
         raise rejected
     return response
@@ -507,7 +529,7 @@ def inspect_evidence(
     case_id: LocalID,
     payload: EvidenceRequestCreate,
     request: Request,
-    visitor: CurrentVisitor,
+    actor: CurrentActor,
     clock: Annotated[Clock, Depends(get_clock)],
 ):
     if request.query_params:

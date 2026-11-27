@@ -35,6 +35,8 @@ def check_database(engine: Engine, expected_revision: str) -> str | None:
             required = {
                 "alembic_version",
                 "visitor_contexts",
+                "workspace_actors",
+                "actor_sessions",
                 "dataset_versions",
                 "incidents",
                 "investigations",

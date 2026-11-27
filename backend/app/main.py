@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException
 from starlette.responses import JSONResponse
 
+from app.actor_auth import router as actor_auth_router
 from app.api_errors import APIError
 from app.catalog import initialize_catalog
 from app.config import Settings, validate_findings_deadline
@@ -114,6 +115,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="OpsPilot AI API", version="0.1.0", lifespan=lifespan)
     app.include_router(visitor_router)
+    app.include_router(actor_auth_router)
     app.include_router(investigation_router)
     app.include_router(evidence_router)
     app.include_router(findings_router)
