@@ -2,8 +2,10 @@ import hashlib
 import re
 import secrets
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -15,9 +17,34 @@ from app.api_errors import APIError
 from app.models import VisitorContext
 
 COOKIE_NAME = "__Host-opspilot_visitor"
+DEV_HTTP_COOKIE_NAME = "opspilot_visitor"
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9_-]{43}", flags=re.ASCII)
 Clock = Callable[[], datetime]
 router = APIRouter(prefix="/api/v1")
+
+
+@dataclass(frozen=True)
+class CookiePolicy:
+    name: str
+    secure: bool
+    httponly: bool = True
+    samesite: Literal["lax"] = "lax"
+    path: str = "/"
+
+
+HTTPS_COOKIE_POLICY = CookiePolicy(name=COOKIE_NAME, secure=True)
+DEV_HTTP_COOKIE_POLICY = CookiePolicy(name=DEV_HTTP_COOKIE_NAME, secure=False)
+
+
+def get_cookie_policy(request: Request) -> CookiePolicy:
+    settings = request.app.state.settings
+    if settings.allow_insecure_local_http and urlsplit(settings.public_origin).scheme == "http":
+        return DEV_HTTP_COOKIE_POLICY
+    return HTTPS_COOKIE_POLICY
+
+
+def get_session_token(request: Request) -> str | None:
+    return request.cookies.get(get_cookie_policy(request).name)
 
 
 def get_clock() -> Clock:
@@ -72,7 +99,7 @@ def authenticate(db: Session, token: str | None, clock: Clock) -> VisitorSession
 
 def resolve_visitor(request: Request, clock: Clock) -> VisitorSession:
     with Session(request.app.state.engine) as db, db.begin():
-        return authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        return authenticate(db, get_session_token(request), clock)
 
 
 def require_visitor(
@@ -88,8 +115,14 @@ def require_visitor(
 CurrentVisitor = Annotated[VisitorSession, Depends(require_visitor, scope="function")]
 
 
-def clear_session_cookie(response: Response) -> None:
-    response.delete_cookie(COOKIE_NAME, path="/", secure=True, httponly=True, samesite="lax")
+def clear_session_cookie(response: Response, policy: CookiePolicy = HTTPS_COOKIE_POLICY) -> None:
+    response.delete_cookie(
+        policy.name,
+        path=policy.path,
+        secure=policy.secure,
+        httponly=policy.httponly,
+        samesite=policy.samesite,
+    )
 
 
 @router.post(
@@ -104,7 +137,8 @@ def bootstrap_visitor(
     response: Response,
     clock: Annotated[Clock, Depends(get_clock)],
 ) -> VisitorSession:
-    token = request.cookies.get(COOKIE_NAME)
+    policy = get_cookie_policy(request)
+    token = get_session_token(request)
     new_token = None
     with Session(request.app.state.engine, expire_on_commit=False) as db, db.begin():
         try:
@@ -131,14 +165,14 @@ def bootstrap_visitor(
         if remaining <= 0:
             raise session_failure("SESSION_EXPIRED")
         response.set_cookie(
-            COOKIE_NAME,
+            policy.name,
             new_token,
             max_age=remaining,
             expires=visitor.expires_at,
-            path="/",
-            secure=True,
-            httponly=True,
-            samesite="lax",
+            path=policy.path,
+            secure=policy.secure,
+            httponly=policy.httponly,
+            samesite=policy.samesite,
         )
     else:
         # Fresh query also sees invalidation/expiry during the bootstrap transaction.

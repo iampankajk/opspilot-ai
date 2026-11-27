@@ -21,7 +21,7 @@ from app.findings_provider import MockFindingsProvider
 from app.gemini_findings_provider import build_gemini_provider
 from app.investigations import router as investigation_router
 from app.openai_findings_provider import build_openai_provider
-from app.visitor_sessions import clear_session_cookie
+from app.visitor_sessions import clear_session_cookie, get_cookie_policy
 from app.visitor_sessions import router as visitor_router
 
 logger = logging.getLogger(__name__)
@@ -180,7 +180,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             request, exc.status, exc.code, exc.message, exc.details, exc.retryable
         )
         if exc.clear_cookie:
-            clear_session_cookie(response)
+            clear_session_cookie(response, get_cookie_policy(request))
         return response
 
     @app.exception_handler(SQLAlchemyError)

@@ -58,7 +58,7 @@ from app.models import (
     Finding,
     FindingCase,
 )
-from app.visitor_sessions import COOKIE_NAME, Clock, CurrentVisitor, authenticate, get_clock
+from app.visitor_sessions import Clock, CurrentVisitor, authenticate, get_clock, get_session_token
 from app.workspace_schemas import LocalID, ThreadKind
 
 router = APIRouter(prefix="/api/v1")
@@ -344,7 +344,7 @@ def start(request, investigation_id, thread, case, payload, clock):
         db.add(operation)
         advance(draft, clock)
         db.flush()
-        authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        authenticate(db, get_session_token(request), clock)
         return Attempt(
             investigation_id,
             draft.state_id,
@@ -410,7 +410,7 @@ def reserve(request, attempt, count, clock):
                 raise GenerationFailure("AI_DEADLINE_EXCEEDED")
             operation.counted_input_tokens = count.input_tokens
             operation.reserved_cost_usd = amount
-        authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        authenticate(db, get_session_token(request), clock)
     if rejected:
         raise rejected
 
@@ -704,7 +704,7 @@ def interrupt_expired_publication(request, attempt, clock, result):
                 "draft_version": draft.draft_version,
             }
         db.flush()
-        authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        authenticate(db, get_session_token(request), clock)
     raise rejected or error
 
 
@@ -744,7 +744,7 @@ def finalize_transaction(request, attempt, clock, *, output=None, result=None, e
                     "draft_version": draft.draft_version,
                 }
                 rejected = error
-        authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        authenticate(db, get_session_token(request), clock)
         # Commit must have no pending flush work. Include response preparation and the final
         # authorization above in both deadline checks, immediately before transaction commit.
         db.flush()
@@ -889,5 +889,5 @@ def stored_findings(
         check_case(db, draft, thread_kind, case_id)
         reconcile_overdue(db, draft, clock)
         response = view(db, request, draft, thread_kind, case_id)
-        authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        authenticate(db, get_session_token(request), clock)
         return response

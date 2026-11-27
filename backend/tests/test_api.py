@@ -234,3 +234,30 @@ def test_unexpected_failure_does_not_expose_exception_input(client, monkeypatch)
 def test_configuration_requires_exact_https_origin(origin):
     with pytest.raises(ValueError):
         Settings(database_url="postgresql+psycopg://localhost/unused", public_origin=origin)
+
+
+@pytest.mark.parametrize("origin", ["http://localhost:3000", "http://127.0.0.1:3000"])
+def test_configuration_allows_loopback_http_when_explicitly_enabled(origin):
+    settings = Settings(
+        database_url="postgresql+psycopg://localhost/unused",
+        public_origin=origin,
+        allow_insecure_local_http=True,
+    )
+    assert settings.public_origin == origin
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://example.com:3000",
+        "http://localhost:3000/path",
+        "http://user:pass@localhost:3000",
+    ],
+)
+def test_configuration_rejects_non_loopback_or_malformed_http_even_when_enabled(origin):
+    with pytest.raises(ValueError):
+        Settings(
+            database_url="postgresql+psycopg://localhost/unused",
+            public_origin=origin,
+            allow_insecure_local_http=True,
+        )

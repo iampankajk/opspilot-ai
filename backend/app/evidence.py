@@ -39,7 +39,7 @@ from app.models import (
     StateSource,
     WorkingDraft,
 )
-from app.visitor_sessions import COOKIE_NAME, Clock, CurrentVisitor, authenticate, get_clock
+from app.visitor_sessions import Clock, CurrentVisitor, authenticate, get_clock, get_session_token
 from app.workspace_schemas import AssociationBasis, LocalID, ThreadKind
 
 router = APIRouter(prefix="/api/v1")
@@ -67,7 +67,7 @@ def conflict(code, draft):
 
 
 def owned_draft(db, request, investigation_id, clock, state_id=None):
-    actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+    actor = authenticate(db, get_session_token(request), clock)
     investigation = db.scalar(
         select(Investigation)
         .where(
@@ -135,7 +135,7 @@ def reconcile_owned(request, investigation_id, state_id, thread, case, clock):
         draft = owned_draft(db, request, investigation_id, clock, state_id)
         check_case(db, draft, thread, case)
         reconcile_overdue(db, draft, clock)
-        authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        authenticate(db, get_session_token(request), clock)
 
 
 def start(request, investigation_id, thread, case, payload, clock):
@@ -238,7 +238,7 @@ def start(request, investigation_id, thread, case, payload, clock):
             )
         advance(draft, clock)
         db.flush()
-        authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        authenticate(db, get_session_token(request), clock)
         return request_id, draft.draft_version, criteria, sources, inventory, end
 
 
@@ -491,7 +491,7 @@ def finalize(
                     relationships=relationships,
                 )
         # Authentication is repeated after row-lock waits and writes, before commit.
-        authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        authenticate(db, get_session_token(request), clock)
     if rejected:
         raise rejected
     return response
