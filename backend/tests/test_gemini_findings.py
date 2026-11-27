@@ -2308,3 +2308,170 @@ def test_simplified_wire_schema_still_enforces_strict_application_bounds(
     assert row.normalized_output is None
     assert graph_counts(engine, workspace) == [0] * 5
     assert FAKE_KEY not in response.text + caplog.text + str(vars(row))
+
+
+def test_instructions_document_reference_format_and_citation_rules():
+    for expected in (
+        "evidence.source_outcomes[*].records[*]",
+        "/payload/",
+        "/timestamps/",
+        "~0",
+        "~1",
+        "/payload/Amount~1currency",
+        'role="supports"',
+        "not_confirmed",
+        "citation_indexes",
+    ):
+        assert expected in findings.INSTRUCTIONS
+
+
+@pytest.mark.parametrize(
+    "pointer,succeeds",
+    [
+        ("/payload/Amount/currency", False),
+        ("/payload/Amount~1currency", True),
+    ],
+    ids=["unescaped-slash", "escaped-slash"],
+)
+def test_slash_field_pointer_escaping_and_publication(gemini, wire, pointer, succeeds):
+    client, engine = gemini
+    output = cited_output()
+    output["findings"][0]["citations"][0]["pointer"] = pointer
+    wire[1][GENERATE] = lambda _: httpx2.Response(200, json=gemini_body(output=output))
+    workspace = prepare(client)
+    response = generate(client, workspace)
+    if succeeds:
+        assert response.status_code == 201, response.text
+        assert response.json()["findings"][0]["citations"][0]["value"] == "SGD 48.00"
+        assert graph_counts(engine, workspace) == [1, 1, 1, 1, 0]
+    else:
+        check_error(response, 502, "AI_REFERENCE_INVALID", True)
+        assert graph_counts(engine, workspace) == [0] * 5
+
+
+@pytest.mark.parametrize(
+    "scenario,expected_category",
+    [
+        ("invalid-locator", "invalid_locator"),
+        ("missing-array-item", "missing_array_item"),
+        ("missing-field", "missing_field"),
+        ("duplicate-claim", "duplicate_claim"),
+        ("unreturned-record", "unreturned_record"),
+        ("duplicate-citation", "duplicate_citation"),
+        ("citation-index-oob", "citation_index_oob"),
+        ("unknown-source-key", "unknown_source_key"),
+        ("confirmed-without-support", "confirmed_without_support"),
+        ("not-confirmed-without-citation", "not_confirmed_without_citation"),
+        ("uncited-hypothesis-invalid", "uncited_hypothesis_invalid"),
+    ],
+)
+def test_reference_validation_diagnostics_classify_every_rule_without_leaking(
+    deployment, monkeypatch, capsys, caplog, scenario, expected_category
+):
+    engine, config = deployment
+    received, handlers = install_wire(monkeypatch, expected_key=SYNTHETIC_AQ_KEY)
+    output = cited_output()
+    finding = output["findings"][0]
+    finding["claim"] = f"Claim {PRIVATE}"
+    finding["citations"][0]["explanation"] = f"Explanation {PRIVATE}"
+    match scenario:
+        case "invalid-locator":
+            finding["citations"][0]["pointer"] = f"/other/{PRIVATE}"
+        case "missing-array-item":
+            finding["citations"][0]["pointer"] = "/timestamps/9"
+        case "missing-field":
+            finding["citations"][0]["pointer"] = f"/payload/{PRIVATE}"
+        case "duplicate-claim":
+            second = json.loads(json.dumps(finding))
+            second["claim"] = f"  claim   {PRIVATE.lower()} "
+            output["findings"].append(second)
+        case "unreturned-record":
+            finding["citations"][0]["evidence_record_id"] = "SYN-PO-ATT-002-A"
+        case "duplicate-citation":
+            finding["citations"].append(dict(finding["citations"][0]))
+        case "citation-index-oob":
+            finding["rationale"][0]["citation_indexes"] = [1]
+        case "unknown-source-key":
+            finding["rationale"][0]["result_source_keys"] = ["stripe"]
+            # Override the bundle check by passing an unknown key only if schema allows;
+            # schema restricts Literal QuerySource, so test validate_references directly below.
+            pass
+        case "confirmed-without-support":
+            finding["proposed_status"] = "confirmed"
+            finding["citations"][0]["role"] = "context"
+        case "not-confirmed-without-citation":
+            finding["proposed_status"] = "not_confirmed"
+            finding["citations"] = []
+            finding["rationale"][0]["citation_indexes"] = []
+            finding["rationale"][0]["result_source_keys"] = ["stripe"]
+        case "uncited-hypothesis-invalid":
+            finding["kind"] = "hypothesis"
+            finding["proposed_status"] = "inconclusive"
+            finding["citations"] = []
+            finding["rationale"][0]["citation_indexes"] = []
+            finding["rationale"][0]["result_source_keys"] = ["stripe"]
+        case _:
+            raise AssertionError(f"Unsupported scenario: {scenario}")
+
+    if scenario == "unknown-source-key":
+        # Unknown retrieval outcome cannot be produced via QuerySource Literal on HTTP output,
+        # so verify the exact validate_references branch directly.
+        from app.findings_validation import validate_references
+
+        bundle = {
+            "evidence": {
+                "source_outcomes": [
+                    {
+                        "source_key": "internal_payments",
+                        "records": [
+                            {
+                                "evidence_record_id": "SYN-PO-ATT-001",
+                                "payload": {"Internal status": "Outcome unknown after timeout"},
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        parsed = FindingGenerationOutput.model_validate(output)
+        with pytest.raises(ValueError, match="Unknown retrieval outcome") as exc_info:
+            validate_references(parsed, bundle)
+        assert findings.REFERENCE_DIAGNOSTIC_CATEGORIES[str(exc_info.value)] == expected_category
+        return
+
+    handlers[GENERATE] = lambda _: httpx2.Response(200, json=gemini_body(output=output))
+    aq_config = config.model_copy(update={"gemini_api_key": SecretStr(SYNTHETIC_AQ_KEY)})
+    with worker(aq_config) as client:
+        bootstrap(client)
+        workspace = prepare(client)
+        with caplog.at_level(logging.DEBUG):
+            response = generate(client, workspace)
+        check_error(response, 502, "AI_REFERENCE_INVALID", True)
+        assert [item.url.path for item in received] == [COUNT, GENERATE]
+
+    capture = capsys.readouterr()
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.failure_code == "AI_REFERENCE_INVALID"
+    assert row.normalized_output is None
+    assert graph_counts(engine, workspace) == [0] * 5
+    diagnostic_lines = [
+        record.getMessage() for record in caplog.records if record.name == "app.findings"
+    ]
+    assert diagnostic_lines == [
+        f"Findings reference validation rejected output: category={expected_category} "
+        "provider=gemini"
+    ]
+    for marker in (
+        PRIVATE,
+        SYNTHETIC_AQ_KEY,
+        "SYN-PO-ATT-001",
+        "SYN-PO-ATT-002-A",
+        "/other/",
+        "/timestamps/9",
+        "Claim ",
+        "Invalid evidence locator",
+        "Missing evidence field",
+    ):
+        assert marker not in caplog.text
+        assert marker not in response.text
+        assert marker not in capture.out + capture.err
