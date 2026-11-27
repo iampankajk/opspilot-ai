@@ -14,7 +14,13 @@ from sqlalchemy.orm import Session
 from app.config import Settings
 from app.main import create_app
 from app.models import VisitorContext
-from app.visitor_sessions import COOKIE_NAME, TOKEN_PATTERN, CurrentVisitor, get_clock
+from app.visitor_sessions import (
+    COOKIE_NAME,
+    DEV_HTTP_COOKIE_NAME,
+    TOKEN_PATTERN,
+    CurrentVisitor,
+    get_clock,
+)
 
 HEADERS = {"Origin": "https://localhost:3000", "X-OpsPilot-Request": "1"}
 
@@ -276,3 +282,64 @@ def test_bad_ttl_configuration_is_rejected(ttl):
         Settings(
             database_url="postgresql+psycopg://localhost/unused", visitor_session_ttl_seconds=ttl
         )
+
+
+def test_dev_http_cookie_policy_uses_non_host_non_secure_cookie_and_clears_it(
+    database, monkeypatch
+):
+    engine, base_settings = database
+    http_settings = Settings(
+        database_url=base_settings.database_url,
+        public_origin="http://localhost:3000",
+        allow_insecure_local_http=True,
+    )
+    with engine.connect() as connection:
+        transaction = connection.begin()
+
+        def scoped_session(*args, **kwargs):
+            kwargs.pop("bind", None)
+            return Session(bind=connection, join_transaction_mode="create_savepoint", **kwargs)
+
+        monkeypatch.setattr("app.visitor_sessions.Session", scoped_session)
+        app = create_app(http_settings)
+        clock = Clock()
+        app.dependency_overrides[get_clock] = lambda: clock
+
+        @app.get("/test/current")
+        def current(visitor: CurrentVisitor):
+            return visitor
+
+        with TestClient(app, base_url="http://localhost:3000") as client:
+            http_headers = {"Origin": "http://localhost:3000", "X-OpsPilot-Request": "1"}
+            created = client.post("/api/v1/visitor-session", json={}, headers=http_headers)
+            assert created.status_code == 201
+            cookies = SimpleCookie(created.headers["set-cookie"])
+            assert COOKIE_NAME not in cookies
+            cookie = cookies[DEV_HTTP_COOKIE_NAME]
+            assert cookie["httponly"] and not cookie["secure"]
+            assert cookie["path"] == "/" and not cookie["domain"]
+            assert cookie["samesite"] == "lax"
+
+            current_resp = client.get("/test/current")
+            assert current_resp.status_code == 200
+            assert current_resp.json() == created.json()
+
+            invalid = client.get(
+                "/test/current", headers={"Cookie": f"{DEV_HTTP_COOKIE_NAME}=invalid"}
+            )
+            assert invalid.status_code == 401
+            assert invalid.json()["error"]["code"] == "SESSION_INVALID"
+            cleared = SimpleCookie(invalid.headers["set-cookie"])[DEV_HTTP_COOKIE_NAME]
+            assert cleared["max-age"] == "0"
+            assert cleared["httponly"] and not cleared["secure"]
+            assert cleared["path"] == "/" and cleared["samesite"] == "lax"
+        transaction.rollback()
+
+
+def test_https_origin_retains_host_secure_cookie_even_when_dev_http_flag_is_set(context):
+    client, _, _, app = context
+    app.state.settings = app.state.settings.model_copy(update={"allow_insecure_local_http": True})
+    response = bootstrap(client)
+    assert response.status_code == 201
+    cookie = SimpleCookie(response.headers["set-cookie"])[COOKIE_NAME]
+    assert cookie["httponly"] and cookie["secure"]

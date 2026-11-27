@@ -113,6 +113,16 @@ nvm use
 npm --prefix frontend run dev
 ```
 
+For local HTTP-only browser environments (such as an isolated browser that does not trust the
+self-signed certificate), set `PUBLIC_ORIGIN=http://localhost:3000` and
+`ALLOW_INSECURE_LOCAL_HTTP=true` in `backend/.env` (which switches the session cookie to a
+development-only non-`__Host-` cookie `opspilot_visitor` without `Secure`), and run:
+
+```sh
+nvm use
+npm --prefix frontend run dev:http
+```
+
 Open [the local foundation page](https://localhost:3000). The 30-day development certificate is
 self-signed; your browser may require you to handle its local certificate warning. The helper
 does not change OS/browser trust settings or overwrite existing certificates. Never disable

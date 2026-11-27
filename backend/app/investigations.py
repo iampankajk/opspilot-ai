@@ -21,7 +21,7 @@ from app.models import (
     ThreadState,
     WorkingDraft,
 )
-from app.visitor_sessions import COOKIE_NAME, Clock, CurrentVisitor, authenticate, get_clock
+from app.visitor_sessions import Clock, CurrentVisitor, authenticate, get_clock, get_session_token
 from app.workspace_schemas import (
     CaseList,
     CaseListQuery,
@@ -159,7 +159,7 @@ def checked_view(
     materialize_state(db, investigation.investigation_id)
     reconcile_overdue(db, db.get(WorkingDraft, investigation.investigation_id), clock)
     result = workspace_view(db, investigation)
-    actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+    actor = authenticate(db, get_session_token(request), clock)
     if actor.visitor_context_id != investigation.visitor_context_id:
         raise not_found()
     return result
@@ -168,7 +168,7 @@ def checked_view(
 def create_or_resume(request: Request, incident_id: UUID, clock: Clock) -> tuple[Workspace, bool]:
     try:
         with Session(request.app.state.engine) as db, db.begin():
-            actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+            actor = authenticate(db, get_session_token(request), clock)
             existing = db.scalar(
                 select(Investigation)
                 .where(
@@ -197,7 +197,7 @@ def create_or_resume(request: Request, incident_id: UUID, clock: Clock) -> tuple
             raise
         # The losing graph is rolled back. Read the committed winner in a fresh transaction.
         with Session(request.app.state.engine) as db, db.begin():
-            actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+            actor = authenticate(db, get_session_token(request), clock)
             winner = db.scalar(
                 select(Investigation)
                 .where(
@@ -339,7 +339,7 @@ def thread_cases(
                 for case in cases
             ],
         )
-        actor = authenticate(db, request.cookies.get(COOKIE_NAME), clock)
+        actor = authenticate(db, get_session_token(request), clock)
         if actor.visitor_context_id != investigation.visitor_context_id:
             raise not_found()
         return result

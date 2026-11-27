@@ -6,7 +6,15 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 
@@ -29,6 +37,7 @@ class Settings(BaseModel):
 
     database_url: SecretStr
     public_origin: str = "https://localhost:3000"
+    allow_insecure_local_http: bool = False
     visitor_session_ttl_seconds: int = Field(default=86400, gt=0)
     current_dataset_version: str = "synthetic-payments-v0.1"
     ai_findings_enabled: bool = False
@@ -61,23 +70,29 @@ class Settings(BaseModel):
             raise ValueError("A PostgreSQL database using the psycopg driver is required")
         return value
 
-    @field_validator("public_origin")
-    @classmethod
-    def require_https_origin(cls, value: str) -> str:
-        url = urlsplit(value)
+    @model_validator(mode="after")
+    def validate_public_origin(self) -> "Settings":
+        url = urlsplit(self.public_origin)
         if (
-            url.scheme != "https"
-            or not url.hostname
+            not url.hostname
             or url.username
             or url.password
             or url.path
             or url.query
             or url.fragment
         ):
-            raise ValueError("PUBLIC_ORIGIN must be an HTTPS origin without a path")
+            raise ValueError("PUBLIC_ORIGIN must be an origin without a path")
         # Accessing port also validates its syntax and range.
         _ = url.port
-        return value
+        if url.scheme == "https":
+            return self
+        if (
+            url.scheme == "http"
+            and self.allow_insecure_local_http
+            and url.hostname in {"localhost", "127.0.0.1"}
+        ):
+            return self
+        raise ValueError("PUBLIC_ORIGIN must be an HTTPS origin without a path")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -86,6 +101,7 @@ class Settings(BaseModel):
             settings = cls(
                 database_url=os.environ.get("DATABASE_URL", ""),
                 public_origin=os.environ.get("PUBLIC_ORIGIN", "https://localhost:3000"),
+                allow_insecure_local_http=os.environ.get("ALLOW_INSECURE_LOCAL_HTTP", "false"),
                 visitor_session_ttl_seconds=os.environ.get("VISITOR_SESSION_TTL_SECONDS", "86400"),
                 current_dataset_version=os.environ.get(
                     "CURRENT_DATASET_VERSION", "synthetic-payments-v0.1"
