@@ -49,9 +49,59 @@ class FindingsProvider(Protocol):
 _DUPLICATE_JSON_FIELD = object()
 
 
+def _collect_pointers(node: object, prefix: str, pointers: list[str]) -> None:
+    if isinstance(node, dict):
+        if not node:
+            if prefix not in {"/payload", "/timestamps"} and len(prefix) <= 256:
+                pointers.append(prefix)
+            return
+        for key in sorted(node):
+            escaped = str(key).replace("~", "~0").replace("/", "~1")
+            _collect_pointers(node[key], f"{prefix}/{escaped}", pointers)
+    elif isinstance(node, list):
+        if not node:
+            if prefix not in {"/payload", "/timestamps"} and len(prefix) <= 256:
+                pointers.append(prefix)
+            return
+        for index, item in enumerate(node):
+            _collect_pointers(item, f"{prefix}/{index}", pointers)
+    elif prefix not in {"/payload", "/timestamps"} and len(prefix) <= 256:
+        pointers.append(prefix)
+
+
+def valid_citation_pointers(bundle: dict) -> dict[str, list[str]]:
+    evidence = bundle.get("evidence")
+    if not isinstance(evidence, dict):
+        return {}
+    outcomes = evidence.get("source_outcomes")
+    if not isinstance(outcomes, list):
+        return {}
+    records: dict[str, dict] = {}
+    for outcome in outcomes:
+        if not isinstance(outcome, dict):
+            continue
+        for record in outcome.get("records", ()):
+            if isinstance(record, dict) and isinstance(record.get("evidence_record_id"), str):
+                records[record["evidence_record_id"]] = record
+    catalog: dict[str, list[str]] = {}
+    for record_id in sorted(records):
+        record = records[record_id]
+        pointers: list[str] = []
+        for root in ("payload", "timestamps"):
+            if isinstance(record.get(root), (dict, list)):
+                _collect_pointers(record[root], f"/{root}", pointers)
+        catalog[record_id] = pointers
+    return catalog
+
+
 def evidence_message(bundle: dict) -> str:
     data = json.dumps(
-        {"context": bundle["context"], "evidence": bundle["evidence"]}, sort_keys=True
+        {
+            "context": bundle["context"],
+            "evidence": bundle["evidence"],
+            "valid_citation_pointers": valid_citation_pointers(bundle),
+        },
+        sort_keys=True,
     )
     return f"Selected synthetic case evidence (JSON):\n{data}"
 
