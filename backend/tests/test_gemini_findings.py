@@ -29,7 +29,7 @@ from test_openai_findings import cited_output
 from app import evidence, findings
 from app.config import GEMINI_FINDINGS_MODEL, Settings
 from app.database import build_engine
-from app.findings_provider import MockFindingsProvider, ProviderFailure
+from app.findings_provider import MockFindingsProvider, ProviderFailure, valid_citation_pointers
 from app.findings_schemas import FindingGenerationCreate, FindingGenerationOutput
 from app.gemini_findings_provider import (
     API_ORIGIN,
@@ -686,7 +686,9 @@ def test_full_request_parity_usage_and_private_metadata(deployment, wire, monkey
     (message,) = generation["contents"]
     assert message["role"] == "user"
     assert json.loads(message["parts"][0]["text"].split("\n", 1)[1]) == {
-        key: row.input_bundle[key] for key in ("context", "evidence")
+        "context": row.input_bundle["context"],
+        "evidence": row.input_bundle["evidence"],
+        "valid_citation_pointers": valid_citation_pointers(row.input_bundle),
     }
     assert set(generation) == {"systemInstruction", "contents", "generationConfig"}
     generation_config = generation["generationConfig"]
@@ -2475,3 +2477,177 @@ def test_reference_validation_diagnostics_classify_every_rule_without_leaking(
         assert marker not in caplog.text
         assert marker not in response.text
         assert marker not in capture.out + capture.err
+
+
+@pytest.mark.parametrize(
+    "thread,case,partial_stripe",
+    [
+        ("payment_failures", "case-failure-001", False),
+        ("payment_failures", "case-failure-001", True),
+        ("possible_duplicates", "case-duplicate-001", False),
+        ("possible_duplicates", "case-duplicate-001", True),
+    ],
+    ids=["failure-full", "failure-partial", "duplicate-full", "duplicate-partial"],
+)
+def test_valid_citation_pointers_catalog_covers_seeded_cases_within_budget(
+    gemini, wire, monkeypatch, thread, case, partial_stripe
+):
+    from app.findings_provider import evidence_message
+    from app.findings_validation import resolve_pointer, returned_records
+
+    client, engine = gemini
+    received, handlers = wire
+    if partial_stripe:
+        read_source = evidence.read_source
+
+        def fail_stripe(request, criteria, source_key, inventory, end):
+            if source_key == "stripe":
+                raise RuntimeError("Synthetic Stripe failure")
+            return read_source(request, criteria, source_key, inventory, end)
+
+        monkeypatch.setattr(evidence, "read_source", fail_stripe)
+
+    if case == "case-duplicate-001":
+
+        async def replay_duplicate(request):
+            payload = json.loads(request.content)
+            text = payload["contents"][0]["parts"][0]["text"]
+            selected = json.loads(text.split("\n", 1)[1]) | {
+                "response_options": {
+                    "max_output_tokens": payload["generationConfig"]["maxOutputTokens"]
+                }
+            }
+            curated = await MockFindingsProvider().generate(selected, timeout=1)
+            return httpx2.Response(200, json=gemini_body(output=json.loads(curated.output_json)))
+
+        handlers[GENERATE] = replay_duplicate
+
+    workspace = prepare(client, thread, case)
+    response = generate(client, workspace, thread, case)
+    assert response.status_code == 201, response.text
+    assert [item.url.path for item in received] == [COUNT, GENERATE]
+    (row,) = attempts(engine, workspace)
+    bundle = row.input_bundle
+    assert "valid_citation_pointers" not in bundle
+    assert row.input_digest == findings.bundle_digest(bundle)
+
+    catalog = valid_citation_pointers(bundle)
+    records = returned_records(bundle)
+    assert list(catalog) == sorted(records)
+    assert len(catalog) > 0
+    if partial_stripe:
+        assert all(record_id != "SYN-STRIPE-FAIL-001" for record_id in catalog)
+        assert all(record_id != "SYN-STRIPE-DUP-001" for record_id in catalog)
+    other_case_record = "SYN-PO-ATT-002-A" if case == "case-failure-001" else "SYN-PO-ATT-001"
+    assert other_case_record not in catalog
+    assert "SYN-PD-ALERT-001" not in catalog
+
+    for record_id, pointers in catalog.items():
+        assert len(pointers) > 0
+        for pointer in pointers:
+            assert pointer.startswith(("/payload/", "/timestamps/"))
+            assert len(pointer) <= 256
+            resolve_pointer(records[record_id], pointer)
+
+    count_payload = json.loads(received[0].content)
+    gen_payload = json.loads(received[1].content)
+    count_text = count_payload["generateContentRequest"]["contents"][0]["parts"][0]["text"]
+    gen_text = gen_payload["contents"][0]["parts"][0]["text"]
+    assert count_text == gen_text == evidence_message(bundle)
+    assert json.loads(gen_text.split("\n", 1)[1])["valid_citation_pointers"] == catalog
+    assert "valid_citation_pointers" in findings.INSTRUCTIONS
+    # Keep total serialized prompt comfortably below the 12,000-token input cap.
+    assert len(gen_text.encode()) < 48000
+
+
+def test_valid_citation_pointers_handles_special_keys_nesting_arrays_and_determinism():
+    from app.findings_provider import evidence_message
+    from app.findings_validation import resolve_pointer
+
+    record_a = {
+        "evidence_record_id": "REC-B",
+        "payload": {
+            "Amount/currency": "SGD 48.00",
+            "tilde~key": "v1",
+            "both~/slash": "v2",
+            "Mixed Case Key": "v3",
+            "nested": {"inner/key": ["first", {"deep~leaf": 42}], "empty_obj": {}, "empty_arr": []},
+        },
+        "timestamps": [{"raw": "2026-10-20T02:27:00Z", "precision": "minute"}],
+    }
+    record_b = {
+        "evidence_record_id": "REC-A",
+        "payload": {"b_key": 2, "a_key": 1},
+        "timestamps": [],
+    }
+    bundle_one = {
+        "context": {"case_id": "c1"},
+        "evidence": {"source_outcomes": [{"records": [record_a, record_b]}]},
+    }
+    record_a_reordered = {
+        "evidence_record_id": "REC-B",
+        "timestamps": [{"precision": "minute", "raw": "2026-10-20T02:27:00Z"}],
+        "payload": {
+            "nested": {"empty_arr": [], "empty_obj": {}, "inner/key": ["first", {"deep~leaf": 42}]},
+            "Mixed Case Key": "v3",
+            "both~/slash": "v2",
+            "tilde~key": "v1",
+            "Amount/currency": "SGD 48.00",
+        },
+    }
+    bundle_two = {
+        "context": {"case_id": "c1"},
+        "evidence": {"source_outcomes": [{"records": [record_a_reordered, record_b]}]},
+    }
+    catalog_one = valid_citation_pointers(bundle_one)
+    catalog_two = valid_citation_pointers(bundle_two)
+    assert catalog_one == catalog_two
+    assert evidence_message(bundle_one) == evidence_message(bundle_two)
+    assert list(catalog_one) == ["REC-A", "REC-B"]
+    assert catalog_one["REC-A"] == ["/payload/a_key", "/payload/b_key"]
+    expected_b = [
+        "/payload/Amount~1currency",
+        "/payload/Mixed Case Key",
+        "/payload/both~0~1slash",
+        "/payload/nested/empty_arr",
+        "/payload/nested/empty_obj",
+        "/payload/nested/inner~1key/0",
+        "/payload/nested/inner~1key/1/deep~0leaf",
+        "/payload/tilde~0key",
+        "/timestamps/0/precision",
+        "/timestamps/0/raw",
+    ]
+    assert catalog_one["REC-B"] == expected_b
+    for pointer in expected_b:
+        resolve_pointer(record_a, pointer)
+    assert resolve_pointer(record_a, "/payload/both~0~1slash") == "v2"
+    assert resolve_pointer(record_a, "/payload/nested/inner~1key/1/deep~0leaf") == 42
+
+
+@pytest.mark.parametrize(
+    "bad_record_id,bad_pointer",
+    [
+        ("SYN-PO-ATT-001", "/payload/Amount/currency"),
+        ("SYN-PO-ATT-001", "/payload/Fabricated field"),
+        ("SYN-PO-ATT-999", "/payload/Internal status"),
+        ("SYN-PO-ATT-002-A", "/payload/Internal status"),
+    ],
+    ids=["unescaped-slash", "fabricated-field", "unknown-record", "cross-case-record"],
+)
+def test_invalid_or_fabricated_citations_still_rejected_without_partial_publish(
+    gemini, wire, caplog, bad_record_id, bad_pointer
+):
+    client, engine = gemini
+    output = cited_output()
+    output["findings"][0]["citations"][0]["evidence_record_id"] = bad_record_id
+    output["findings"][0]["citations"][0]["pointer"] = bad_pointer
+    wire[1][GENERATE] = lambda _: httpx2.Response(200, json=gemini_body(output=output))
+    workspace = prepare(client)
+    with caplog.at_level(logging.DEBUG):
+        response = generate(client, workspace)
+    check_error(response, 502, "AI_REFERENCE_INVALID", True)
+    assert graph_counts(engine, workspace) == [0] * 5
+    (row,) = attempts(engine, workspace)
+    assert row.status == "failed" and row.normalized_output is None
+    assert bad_pointer not in caplog.text + response.text
+    assert bad_record_id not in caplog.text + response.text

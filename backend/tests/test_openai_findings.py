@@ -20,6 +20,7 @@ from test_investigations import (
 from app import findings, openai_findings_provider
 from app.config import Settings
 from app.findings import INSTRUCTIONS
+from app.findings_provider import valid_citation_pointers
 from app.findings_schemas import FindingGenerationOutput
 from app.main import create_app
 from app.models import AIGenerationRequest
@@ -170,7 +171,12 @@ def test_sdk_serialization_reservation_and_durable_publication(openai_context, f
     (row,) = attempts(connection, workspace)
 
     data = json.dumps(
-        {key: row.input_bundle[key] for key in ("context", "evidence")}, sort_keys=True
+        {
+            "context": row.input_bundle["context"],
+            "evidence": row.input_bundle["evidence"],
+            "valid_citation_pointers": valid_citation_pointers(row.input_bundle),
+        },
+        sort_keys=True,
     )
     schema = count["text"]["format"]["schema"]
     app_schema = FindingGenerationOutput.model_json_schema()
